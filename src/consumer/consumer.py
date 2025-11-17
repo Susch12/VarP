@@ -2,11 +2,18 @@
 Consumidor de simulación Monte Carlo.
 
 Lee el modelo, consume escenarios y ejecuta el modelo publicando resultados.
+
+Fase 4.1: Incluye manejo avanzado de errores:
+- Dead Letter Queue (DLQ) para mensajes fallidos
+- Reintentos automáticos (máximo 3 intentos)
+- Logging estructurado con contexto
+- Manejo detallado de excepciones
 """
 
 import time
 import logging
 import uuid
+import pika
 from typing import Dict, Any, Optional
 
 from src.common.config import QueueConfig, ConsumerConfig
@@ -64,6 +71,12 @@ class Consumer:
         self.tiempo_inicio: Optional[float] = None
         self.tiempo_ultimo_escenario: Optional[float] = None
         self.tiempos_ejecucion = []
+
+        # Estadísticas de errores (Fase 4.1)
+        self.errores_totales = 0
+        self.reintentos_totales = 0
+        self.mensajes_a_dlq = 0
+        self.errores_por_tipo: Dict[str, int] = {}
 
     def ejecutar(self, max_escenarios: Optional[int] = None) -> None:
         """
@@ -188,6 +201,12 @@ class Consumer:
         """
         Callback para procesar cada escenario.
 
+        FASE 4.1: Incluye lógica de reintentos automáticos:
+        - Verifica contador de reintentos en headers
+        - Reintenta hasta MAX_RETRIES (3 intentos)
+        - Envía a DLQ si excede reintentos
+        - Tracking detallado de errores
+
         Args:
             ch: Canal
             method: Método
@@ -196,11 +215,19 @@ class Consumer:
         """
         import json
 
+        # FASE 4.1: Obtener contador de reintentos del header
+        retry_count = 0
+        if properties.headers:
+            retry_count = properties.headers.get('x-retry-count', 0)
+
+        escenario_id = None
+
         try:
             inicio = time.time()
 
             # Parsear escenario
             escenario = json.loads(body)
+            escenario_id = escenario.get('escenario_id', 'unknown')
 
             # Ejecutar modelo
             resultado = self._ejecutar_modelo(escenario)
@@ -227,37 +254,167 @@ class Consumer:
                     f"{self.escenarios_procesados} escenarios procesados"
                 )
 
-            # ACK del mensaje
+            # ACK del mensaje (éxito)
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
+            # Si fue un reintento exitoso, loggear
+            if retry_count > 0:
+                logger.info(
+                    f"Consumidor {self.consumer_id}: Escenario {escenario_id} "
+                    f"procesado exitosamente después de {retry_count} reintentos"
+                )
+
+        # FASE 4.1: Excepciones NO recuperables (enviar directo a DLQ)
         except ExpressionEvaluationError as e:
-            logger.error(
-                f"Consumidor {self.consumer_id}: Error evaluando expresión: {e}"
+            self._handle_error(
+                error=e,
+                error_type='ExpressionEvaluationError',
+                escenario_id=escenario_id,
+                retry_count=retry_count,
+                recoverable=False,  # No recuperable, enviar a DLQ
+                ch=ch,
+                method=method,
+                properties=properties,
+                body=body
             )
-            # NACK con requeue=False (enviar a DLQ si existe)
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
         except TimeoutException as e:
-            logger.error(
-                f"Consumidor {self.consumer_id}: Timeout ejecutando código: {e}"
+            self._handle_error(
+                error=e,
+                error_type='TimeoutException',
+                escenario_id=escenario_id,
+                retry_count=retry_count,
+                recoverable=False,  # Timeout no es recuperable
+                ch=ch,
+                method=method,
+                properties=properties,
+                body=body
             )
-            # NACK con requeue=False (código muy lento, no reintentar)
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
         except SecurityException as e:
-            logger.error(
-                f"Consumidor {self.consumer_id}: Código bloqueado por seguridad: {e}"
+            self._handle_error(
+                error=e,
+                error_type='SecurityException',
+                escenario_id=escenario_id,
+                retry_count=retry_count,
+                recoverable=False,  # Violación de seguridad no es recuperable
+                ch=ch,
+                method=method,
+                properties=properties,
+                body=body
             )
-            # NACK con requeue=False (código no seguro, no reintentar)
+
+        # FASE 4.1: Excepciones potencialmente recuperables (reintentar)
+        except Exception as e:
+            self._handle_error(
+                error=e,
+                error_type=type(e).__name__,
+                escenario_id=escenario_id,
+                retry_count=retry_count,
+                recoverable=True,  # Reintentar
+                ch=ch,
+                method=method,
+                properties=properties,
+                body=body
+            )
+
+    def _handle_error(
+        self,
+        error: Exception,
+        error_type: str,
+        escenario_id: Optional[str],
+        retry_count: int,
+        recoverable: bool,
+        ch,
+        method,
+        properties,
+        body
+    ) -> None:
+        """
+        FASE 4.1: Maneja errores con lógica de reintentos.
+
+        Args:
+            error: La excepción capturada
+            error_type: Tipo de error (para estadísticas)
+            escenario_id: ID del escenario que falló
+            retry_count: Número de reintentos actuales
+            recoverable: Si el error es potencialmente recuperable
+            ch: Canal RabbitMQ
+            method: Método del mensaje
+            properties: Propiedades del mensaje
+            body: Cuerpo del mensaje
+        """
+        # Actualizar estadísticas de errores
+        self.errores_totales += 1
+        self.errores_por_tipo[error_type] = self.errores_por_tipo.get(error_type, 0) + 1
+
+        # Loggear error con contexto
+        logger.error(
+            f"Consumidor {self.consumer_id}: Error procesando escenario {escenario_id}",
+            extra={
+                'consumer_id': self.consumer_id,
+                'escenario_id': escenario_id,
+                'error_type': error_type,
+                'retry_count': retry_count,
+                'recoverable': recoverable
+            },
+            exc_info=True
+        )
+
+        # Decidir acción basado en recoverability y retry_count
+        if not recoverable:
+            # Error NO recuperable: enviar directo a DLQ
+            logger.warning(
+                f"Consumidor {self.consumer_id}: Error NO recuperable ({error_type}), "
+                f"enviando escenario {escenario_id} a DLQ"
+            )
+            self.mensajes_a_dlq += 1
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
-        except Exception as e:
-            logger.error(
-                f"Consumidor {self.consumer_id}: Error procesando escenario: {e}",
-                exc_info=True
+        elif retry_count >= ConsumerConfig.MAX_RETRIES:
+            # Agotados los reintentos: enviar a DLQ
+            logger.warning(
+                f"Consumidor {self.consumer_id}: Agotados {ConsumerConfig.MAX_RETRIES} reintentos "
+                f"para escenario {escenario_id}, enviando a DLQ"
             )
-            # NACK con requeue (reintentar)
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            self.mensajes_a_dlq += 1
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+        else:
+            # Reintentar: republicar mensaje con contador incrementado
+            logger.info(
+                f"Consumidor {self.consumer_id}: Reintentando escenario {escenario_id} "
+                f"(intento {retry_count + 1}/{ConsumerConfig.MAX_RETRIES})"
+            )
+            self.reintentos_totales += 1
+
+            # Incrementar contador de reintentos
+            new_retry_count = retry_count + 1
+
+            # Crear nuevas propiedades con header actualizado
+            new_headers = properties.headers.copy() if properties.headers else {}
+            new_headers['x-retry-count'] = new_retry_count
+            new_headers['x-last-error'] = error_type
+            new_headers['x-consumer-id'] = self.consumer_id
+
+            new_properties = pika.BasicProperties(
+                delivery_mode=2,  # Persistente
+                content_type='application/json',
+                headers=new_headers
+            )
+
+            # Republicar mensaje con delay (esperar antes de reintentar)
+            # Nota: En RabbitMQ no hay delay nativo, pero podríamos usar una cola temporal
+            # Por ahora, republicamos directamente
+            ch.basic_publish(
+                exchange='',
+                routing_key=QueueConfig.ESCENARIOS,
+                body=body,
+                properties=new_properties
+            )
+
+            # ACK del mensaje original (ya lo republicamos)
+            ch.basic_ack(delivery_tag=method.delivery_tag)
 
     def _ejecutar_modelo(self, escenario: Dict[str, Any]) -> Any:
         """
@@ -329,13 +486,17 @@ class Consumer:
         """
         Publica estadísticas del consumidor en la cola de stats.
 
-        Incluye:
+        FASE 4.1: Incluye nuevas estadísticas de errores:
         - Consumer ID
         - Escenarios procesados
         - Tiempo del último escenario
         - Tiempo promedio de ejecución
         - Tasa de procesamiento
         - Estado
+        - Errores totales (FASE 4.1)
+        - Reintentos totales (FASE 4.1)
+        - Mensajes a DLQ (FASE 4.1)
+        - Errores por tipo (FASE 4.1)
         """
         if not self.tiempo_inicio:
             return
@@ -363,7 +524,12 @@ class Consumer:
             'tiempo_promedio': tiempo_promedio,
             'tasa_procesamiento': tasa,
             'estado': 'activo',
-            'tiempo_activo': tiempo_transcurrido
+            'tiempo_activo': tiempo_transcurrido,
+            # FASE 4.1: Estadísticas de errores
+            'errores_totales': self.errores_totales,
+            'reintentos_totales': self.reintentos_totales,
+            'mensajes_a_dlq': self.mensajes_a_dlq,
+            'errores_por_tipo': self.errores_por_tipo
         }
 
         self.client.publish(
@@ -375,11 +541,18 @@ class Consumer:
         logger.debug(
             f"Consumidor {self.consumer_id}: Stats publicadas - "
             f"{self.escenarios_procesados} procesados, "
-            f"tasa={tasa:.2f} esc/s"
+            f"tasa={tasa:.2f} esc/s, "
+            f"errores={self.errores_totales}, "
+            f"reintentos={self.reintentos_totales}, "
+            f"dlq={self.mensajes_a_dlq}"
         )
 
     def _finalizar(self) -> None:
-        """Finaliza el consumidor publicando estadísticas finales."""
+        """
+        Finaliza el consumidor publicando estadísticas finales.
+
+        FASE 4.1: Incluye estadísticas de errores en el resumen.
+        """
         if self.escenarios_procesados > 0:
             self._publicar_stats()
 
@@ -391,6 +564,19 @@ class Consumer:
                 tiempo_total = time.time() - self.tiempo_inicio
                 logger.info(f"Tiempo total: {tiempo_total:.2f}s")
                 logger.info(f"Tasa promedio: {self.escenarios_procesados / tiempo_total:.2f} esc/s")
+
+            # FASE 4.1: Mostrar estadísticas de errores
+            if self.errores_totales > 0:
+                logger.info("-" * 60)
+                logger.info("ESTADÍSTICAS DE ERRORES:")
+                logger.info(f"  Total errores: {self.errores_totales}")
+                logger.info(f"  Reintentos: {self.reintentos_totales}")
+                logger.info(f"  Mensajes a DLQ: {self.mensajes_a_dlq}")
+                if self.errores_por_tipo:
+                    logger.info("  Errores por tipo:")
+                    for tipo, count in self.errores_por_tipo.items():
+                        logger.info(f"    - {tipo}: {count}")
+
             logger.info("=" * 60)
 
 
