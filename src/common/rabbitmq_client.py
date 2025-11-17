@@ -83,13 +83,36 @@ class RabbitMQClient:
 
         Colas:
         - cola_modelo: Modelo a ejecutar (max 1 mensaje)
-        - cola_escenarios: Escenarios a procesar
+        - cola_escenarios: Escenarios a procesar (con DLQ)
         - cola_resultados: Resultados de ejecución
         - cola_stats_productor: Estadísticas del productor
         - cola_stats_consumidores: Estadísticas de consumidores
+        - cola_dlq_escenarios: Dead Letter Queue para escenarios fallidos
+        - cola_dlq_resultados: Dead Letter Queue para resultados fallidos
         """
         if not self.channel:
             raise RabbitMQConnectionError("No hay canal activo. Llame a connect() primero")
+
+        # FASE 4.1: Declarar Dead Letter Queues primero
+        # DLQ para escenarios fallidos (persistente, sin límite de mensajes)
+        self.channel.queue_declare(
+            queue=QueueConfig.DLQ_ESCENARIOS,
+            durable=True,
+            arguments={
+                'x-max-length': 10000,  # Capacidad de mensajes fallidos
+            }
+        )
+        logger.debug(f"DLQ declarada: {QueueConfig.DLQ_ESCENARIOS}")
+
+        # DLQ para resultados fallidos (persistente)
+        self.channel.queue_declare(
+            queue=QueueConfig.DLQ_RESULTADOS,
+            durable=True,
+            arguments={
+                'x-max-length': 10000,
+            }
+        )
+        logger.debug(f"DLQ declarada: {QueueConfig.DLQ_RESULTADOS}")
 
         # Cola de modelo (solo 1 mensaje, persistente)
         self.channel.queue_declare(
@@ -101,22 +124,29 @@ class RabbitMQClient:
         )
         logger.debug(f"Cola declarada: {QueueConfig.MODELO}")
 
-        # Cola de escenarios (persistente)
+        # FASE 4.1: Cola de escenarios con DLQ configurada
+        # Los mensajes rechazados (NACK con requeue=False) van a DLQ
         self.channel.queue_declare(
             queue=QueueConfig.ESCENARIOS,
             durable=True,
             arguments={
                 'x-max-length': 100000,  # Capacidad máxima
+                'x-dead-letter-exchange': '',  # Exchange por defecto
+                'x-dead-letter-routing-key': QueueConfig.DLQ_ESCENARIOS
             }
         )
-        logger.debug(f"Cola declarada: {QueueConfig.ESCENARIOS}")
+        logger.debug(f"Cola declarada: {QueueConfig.ESCENARIOS} (con DLQ: {QueueConfig.DLQ_ESCENARIOS})")
 
-        # Cola de resultados (persistente)
+        # FASE 4.1: Cola de resultados con DLQ configurada
         self.channel.queue_declare(
             queue=QueueConfig.RESULTADOS,
-            durable=True
+            durable=True,
+            arguments={
+                'x-dead-letter-exchange': '',
+                'x-dead-letter-routing-key': QueueConfig.DLQ_RESULTADOS
+            }
         )
-        logger.debug(f"Cola declarada: {QueueConfig.RESULTADOS}")
+        logger.debug(f"Cola declarada: {QueueConfig.RESULTADOS} (con DLQ: {QueueConfig.DLQ_RESULTADOS})")
 
         # Cola de estadísticas del productor (no persistente, TTL 60s)
         self.channel.queue_declare(
@@ -140,7 +170,7 @@ class RabbitMQClient:
         )
         logger.debug(f"Cola declarada: {QueueConfig.STATS_CONSUMIDORES}")
 
-        logger.info("Todas las colas declaradas exitosamente")
+        logger.info("Todas las colas declaradas exitosamente (incluyendo DLQs)")
 
     def purge_queue(self, queue_name: str) -> int:
         """

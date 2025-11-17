@@ -37,6 +37,10 @@ class QueueConfig:
     STATS_PRODUCTOR = os.getenv('QUEUE_STATS_PRODUCTOR', 'cola_stats_productor')
     STATS_CONSUMIDORES = os.getenv('QUEUE_STATS_CONSUMIDORES', 'cola_stats_consumidores')
 
+    # Dead Letter Queue (Fase 4.1)
+    DLQ_ESCENARIOS = os.getenv('QUEUE_DLQ_ESCENARIOS', 'cola_dlq_escenarios')
+    DLQ_RESULTADOS = os.getenv('QUEUE_DLQ_RESULTADOS', 'cola_dlq_resultados')
+
 
 class ProducerConfig:
     """Configuración del productor."""
@@ -50,6 +54,10 @@ class ConsumerConfig:
     STATS_INTERVAL = int(os.getenv('CONSUMER_STATS_INTERVAL', '2'))
     PREFETCH_COUNT = int(os.getenv('CONSUMER_PREFETCH_COUNT', '1'))
     TIMEOUT = int(os.getenv('CONSUMER_TIMEOUT', '30'))
+
+    # Manejo de errores (Fase 4.1)
+    MAX_RETRIES = int(os.getenv('CONSUMER_MAX_RETRIES', '3'))
+    RETRY_DELAY = int(os.getenv('CONSUMER_RETRY_DELAY', '5'))  # segundos
 
 
 class DashboardConfig:

@@ -8,10 +8,11 @@ Lee y valida archivos de configuración que definen:
 - Parámetros de simulación
 """
 
+import ast
 import configparser
 import re
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, field
 
 
@@ -389,6 +390,16 @@ class ModelParser:
             if not codigo:
                 raise ModelParserError("Código no puede estar vacío")
 
+            # Fase 3.3: Validar sintaxis Python
+            self._validate_python_syntax(codigo)
+
+            # Fase 3.3: Verificar que define variable 'resultado'
+            if not self._check_resultado_variable(codigo):
+                raise ModelParserError(
+                    "El código debe definir una variable 'resultado'\n"
+                    "Ejemplo: resultado = x + y"
+                )
+
             funcion['codigo'] = codigo
 
         return funcion
@@ -511,6 +522,100 @@ class ModelParser:
                 dedented_lines.append('')
 
         return '\n'.join(dedented_lines)
+
+    def _validate_python_syntax(self, code: str) -> None:
+        """
+        Valida que el código Python tenga sintaxis correcta.
+
+        Args:
+            code: Código Python a validar
+
+        Raises:
+            ModelParserError: Si el código tiene errores de sintaxis
+
+        Note:
+            Usa ast.parse para validar sintaxis sin ejecutar el código
+        """
+        try:
+            ast.parse(code)
+        except SyntaxError as e:
+            raise ModelParserError(
+                f"Error de sintaxis Python en código:\n"
+                f"  Línea {e.lineno}: {e.msg}\n"
+                f"  {e.text}"
+            )
+
+    def _check_resultado_variable(self, code: str) -> bool:
+        """
+        Verifica si el código define una variable 'resultado'.
+
+        Args:
+            code: Código Python a analizar
+
+        Returns:
+            True si el código asigna a 'resultado', False en caso contrario
+
+        Note:
+            Analiza el AST para detectar asignaciones a 'resultado'
+        """
+        try:
+            tree = ast.parse(code)
+
+            # Buscar asignaciones en el AST
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    # Revisar targets de la asignación
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == 'resultado':
+                            return True
+                        # Caso de tuple unpacking: a, resultado = ...
+                        elif isinstance(target, ast.Tuple):
+                            for elt in target.elts:
+                                if isinstance(elt, ast.Name) and elt.id == 'resultado':
+                                    return True
+                # Caso de asignación aumentada: resultado += ...
+                elif isinstance(node, ast.AugAssign):
+                    if isinstance(node.target, ast.Name) and node.target.id == 'resultado':
+                        return True
+
+            return False
+        except SyntaxError:
+            # Si hay error de sintaxis, retornar False
+            return False
+
+    def _get_assigned_variables(self, code: str) -> Set[str]:
+        """
+        Obtiene el conjunto de variables asignadas en el código.
+
+        Args:
+            code: Código Python a analizar
+
+        Returns:
+            Set de nombres de variables asignadas
+
+        Note:
+            Analiza el AST para extraer todas las asignaciones
+        """
+        try:
+            tree = ast.parse(code)
+            variables = set()
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            variables.add(target.id)
+                        elif isinstance(target, ast.Tuple):
+                            for elt in target.elts:
+                                if isinstance(elt, ast.Name):
+                                    variables.add(elt.id)
+                elif isinstance(node, ast.AugAssign):
+                    if isinstance(node.target, ast.Name):
+                        variables.add(node.target.id)
+
+            return variables
+        except SyntaxError:
+            return set()
 
     def _parse_simulacion(self) -> Dict[str, Any]:
         """
