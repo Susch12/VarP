@@ -21,12 +21,13 @@ class DistributionGenerator:
 
     Soporta:
     - Fase 1: Normal, Uniforme, Exponencial
-    - Fase 3: Lognormal, Triangular, Binomial (futuro)
+    - Fase 3.2: Lognormal, Triangular, Binomial
     """
 
-    # Distribuciones soportadas en Fase 1
+    # Distribuciones soportadas
     SUPPORTED_DISTRIBUTIONS = {
-        'normal', 'uniform', 'exponential'
+        'normal', 'uniform', 'exponential',
+        'lognormal', 'triangular', 'binomial'
     }
 
     def __init__(self, seed: int = None):
@@ -81,6 +82,12 @@ class DistributionGenerator:
                 value = self._generate_uniform(params)
             elif distribution == 'exponential':
                 value = self._generate_exponential(params)
+            elif distribution == 'lognormal':
+                value = self._generate_lognormal(params)
+            elif distribution == 'triangular':
+                value = self._generate_triangular(params)
+            elif distribution == 'binomial':
+                value = self._generate_binomial(params)
             else:
                 raise DistributionError(f"Distribución '{distribution}' no implementada")
 
@@ -163,6 +170,81 @@ class DistributionGenerator:
 
         return np.random.exponential(scale)
 
+    def _generate_lognormal(self, params: Dict[str, Any]) -> float:
+        """
+        Genera valor de distribución Lognormal.
+
+        Args:
+            params: {'mu': float, 'sigma': float}
+
+        Returns:
+            Valor aleatorio ~ LogNormal(mu, sigma)
+
+        Note:
+            Si X ~ N(mu, sigma), entonces exp(X) ~ LogNormal(mu, sigma)
+            Media = exp(mu + sigma^2/2)
+            Varianza = (exp(sigma^2) - 1) * exp(2*mu + sigma^2)
+        """
+        mu = float(params['mu'])
+        sigma = float(params['sigma'])
+
+        if sigma <= 0:
+            raise ValueError("sigma debe ser > 0")
+
+        return np.random.lognormal(mu, sigma)
+
+    def _generate_triangular(self, params: Dict[str, Any]) -> float:
+        """
+        Genera valor de distribución Triangular.
+
+        Args:
+            params: {'left': float, 'mode': float, 'right': float}
+
+        Returns:
+            Valor aleatorio ~ Triangular(left, mode, right)
+
+        Note:
+            left <= mode <= right
+            Distribución triangular con pico en 'mode'
+        """
+        left = float(params['left'])
+        mode = float(params['mode'])
+        right = float(params['right'])
+
+        if not (left <= mode <= right):
+            raise ValueError("Se requiere: left <= mode <= right")
+
+        if left >= right:
+            raise ValueError("left debe ser < right")
+
+        return np.random.triangular(left, mode, right)
+
+    def _generate_binomial(self, params: Dict[str, Any]) -> float:
+        """
+        Genera valor de distribución Binomial.
+
+        Args:
+            params: {'n': int, 'p': float}
+
+        Returns:
+            Valor aleatorio ~ Binomial(n, p)
+
+        Note:
+            n: número de ensayos
+            p: probabilidad de éxito en cada ensayo (0 <= p <= 1)
+            Retorna el número de éxitos en n ensayos
+        """
+        n = int(params['n'])
+        p = float(params['p'])
+
+        if n <= 0:
+            raise ValueError("n debe ser > 0")
+
+        if not (0 <= p <= 1):
+            raise ValueError("p debe estar en [0, 1]")
+
+        return float(np.random.binomial(n, p))
+
     def generate_batch(self, distribution: str, params: Dict[str, Any],
                        size: int, tipo: str = 'float') -> np.ndarray:
         """
@@ -219,6 +301,24 @@ class DistributionGenerator:
                 'parametros': ['lambda'],
                 'descripcion': 'Distribución de tiempos entre eventos',
                 'ejemplo': "{'lambda': 1.5}"
+            },
+            'lognormal': {
+                'nombre': 'Lognormal',
+                'parametros': ['mu', 'sigma'],
+                'descripcion': 'Distribución de variable cuyo logaritmo es normal',
+                'ejemplo': "{'mu': 0, 'sigma': 1}"
+            },
+            'triangular': {
+                'nombre': 'Triangular',
+                'parametros': ['left', 'mode', 'right'],
+                'descripcion': 'Distribución triangular con pico en mode',
+                'ejemplo': "{'left': 0, 'mode': 5, 'right': 10}"
+            },
+            'binomial': {
+                'nombre': 'Binomial',
+                'parametros': ['n', 'p'],
+                'descripcion': 'Número de éxitos en n ensayos con probabilidad p',
+                'ejemplo': "{'n': 10, 'p': 0.5}"
             }
         }
 

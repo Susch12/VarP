@@ -73,7 +73,10 @@ class ModelParser:
 
     REQUIRED_SECTIONS = ['METADATA', 'VARIABLES', 'FUNCION', 'SIMULACION']
     VALID_TIPOS = {'float', 'int'}
-    VALID_DISTRIBUCIONES_FASE1 = {'normal', 'uniform', 'exponential'}
+    VALID_DISTRIBUCIONES = {
+        'normal', 'uniform', 'exponential',  # Fase 1
+        'lognormal', 'triangular', 'binomial'  # Fase 3.2
+    }
 
     def __init__(self, filepath: str):
         """
@@ -301,11 +304,11 @@ class ModelParser:
                 f"Tipo '{tipo}' inválido. Válidos: {self.VALID_TIPOS}"
             )
 
-        # Validar distribución (solo Fase 1 por ahora)
-        if distribucion not in self.VALID_DISTRIBUCIONES_FASE1:
+        # Validar distribución
+        if distribucion not in self.VALID_DISTRIBUCIONES:
             raise ValueError(
-                f"Distribución '{distribucion}' no soportada en Fase 1. "
-                f"Válidas: {self.VALID_DISTRIBUCIONES_FASE1}"
+                f"Distribución '{distribucion}' no soportada. "
+                f"Válidas: {self.VALID_DISTRIBUCIONES}"
             )
 
         # Parsear parámetros: "media=0", "std=1"
