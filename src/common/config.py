@@ -22,6 +22,19 @@ class RabbitMQConfig:
     VHOST = os.getenv('RABBITMQ_VHOST', '/')
     MGMT_PORT = int(os.getenv('RABBITMQ_MGMT_PORT', '15672'))
 
+    # Fase 4.2: Configuración óptima de conexión
+    HEARTBEAT = int(os.getenv('RABBITMQ_HEARTBEAT', '60'))  # segundos
+    CONNECTION_TIMEOUT = int(os.getenv('RABBITMQ_CONNECTION_TIMEOUT', '10'))  # segundos
+    BLOCKED_CONNECTION_TIMEOUT = int(os.getenv('RABBITMQ_BLOCKED_TIMEOUT', '300'))  # segundos
+    SOCKET_TIMEOUT = int(os.getenv('RABBITMQ_SOCKET_TIMEOUT', '10'))  # segundos
+    STACK_TIMEOUT = int(os.getenv('RABBITMQ_STACK_TIMEOUT', '15'))  # segundos
+
+    # Connection pooling (Fase 4.2)
+    POOL_SIZE = int(os.getenv('RABBITMQ_POOL_SIZE', '10'))  # Número de conexiones en pool
+    POOL_MAX_OVERFLOW = int(os.getenv('RABBITMQ_POOL_MAX_OVERFLOW', '5'))  # Conexiones adicionales si pool lleno
+    POOL_TIMEOUT = int(os.getenv('RABBITMQ_POOL_TIMEOUT', '30'))  # Tiempo de espera para obtener conexión
+    POOL_RECYCLE = int(os.getenv('RABBITMQ_POOL_RECYCLE', '3600'))  # Reciclar conexiones después de N segundos
+
     @classmethod
     def get_connection_url(cls) -> str:
         """Retorna URL de conexión para pika."""
