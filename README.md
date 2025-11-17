@@ -1236,194 +1236,590 @@ python-dotenv>=1.0.0
 
 ---
 
-## 📋 Plan de Implementación
+## 📋 Plan de Implementación (1 Semana)
 
-### Fase 1: Definición y Setup (Semana 1)
+### **FASE 1: MVP Funcional (Día 1-2) - 2 días** 🚀
 
-**Objetivos:**
-- ✅ Definir formato final del archivo de modelo
-- ✅ Configurar infraestructura básica
+**Objetivo**: Sistema básico productor-consumidor funcionando con expresiones matemáticas
 
-**Tareas:**
-1. [ ] **DECISIÓN**: Definir formato de función en archivo modelo
-2. [ ] **DECISIÓN**: Definir distribuciones de probabilidad soportadas
-3. [ ] **DECISIÓN**: Definir política de timeout delivery
-4. [ ] Configurar proyecto Python
-5. [ ] Instalar y configurar RabbitMQ
-6. [ ] Crear estructura de directorios
+**Tareas**:
+- [ ] Setup inicial del proyecto
+  - [ ] Crear virtualenv + requirements.txt
+  - [ ] Estructura de directorios (src/, modelos/, tests/)
+  - [ ] Configurar .gitignore
 
-**Entregables:**
-- Especificación completa del archivo de modelo
-- RabbitMQ funcionando
-- Estructura base del proyecto
+- [ ] Docker Compose con RabbitMQ
+  - [ ] docker-compose.yml básico
+  - [ ] Verificar RabbitMQ Management UI (puerto 15672)
 
-### Fase 2: Productor (Semana 2)
+- [ ] Parser de modelos (solo .ini con expresiones)
+  - [ ] Leer archivo .ini
+  - [ ] Parser sección [METADATA]
+  - [ ] Parser sección [VARIABLES]
+  - [ ] Parser sección [FUNCION] tipo="expresion"
+  - [ ] Parser sección [SIMULACION]
 
-**Objetivos:**
-- Implementar generación y publicación de escenarios
+- [ ] Generador de distribuciones
+  - [ ] Normal (media, std)
+  - [ ] Uniforme (min, max)
+  - [ ] Exponencial (lambda)
+  - [ ] Tests unitarios distribuciones
 
-**Tareas:**
-1. [ ] Parser de archivo de modelo
-2. [ ] Validador de modelo
-3. [ ] Generador de valores aleatorios por distribución
-4. [ ] Publicación de modelo en cola
-5. [ ] Generación y publicación de escenarios
-6. [ ] Publicación de estadísticas
-7. [ ] Tests unitarios
+- [ ] Productor básico
+  - [ ] Conexión a RabbitMQ con Pika
+  - [ ] Declaración de colas (modelo, escenarios)
+  - [ ] Purgar + publicar modelo en cola_modelo
+  - [ ] Generar escenarios únicos (ID + timestamp)
+  - [ ] Publicar escenarios en cola_escenarios
+  - [ ] Tests de productor
 
-**Entregables:**
-- Productor funcional
-- Tests pasando
+- [ ] Consumidor básico
+  - [ ] Leer modelo de cola (una vez al iniciar)
+  - [ ] Evaluador de expresiones seguras con AST
+  - [ ] Consumir escenarios de cola_escenarios
+  - [ ] Ejecutar expresión con valores del escenario
+  - [ ] Publicar resultados en cola_resultados
+  - [ ] Tests de consumidor
 
-### Fase 3: Consumidor (Semana 3)
+- [ ] Integración y prueba
+  - [ ] Ejemplo simple: suma de 2 normales
+  - [ ] Ejecutar 1000 escenarios con 2 consumidores
+  - [ ] Validar resultados
 
-**Objetivos:**
-- Implementar ejecución de modelos
+**Entregables**:
+- ✅ Productor + Consumidor funcionando
+- ✅ Modelo de ejemplo ejecutable
+- ✅ Tests básicos pasando
 
-**Tareas:**
-1. [ ] Lectura de modelo de cola
-2. [ ] Compilador/interpretador de función
-3. [ ] **DECISIÓN**: Implementar sandbox de seguridad
-4. [ ] Ejecución de modelo con escenario
-5. [ ] Publicación de resultados
-6. [ ] Publicación de estadísticas
-7. [ ] Manejo de errores y timeouts
-8. [ ] Tests unitarios
-
-**Entregables:**
-- Consumidor funcional
-- Tests pasando
-
-### Fase 4: Dashboard (Semana 4)
-
-**Objetivos:**
-- Visualización en tiempo real
-
-**Tareas:**
-1. [ ] **DECISIÓN**: Elegir framework (Dash vs Streamlit)
-2. [ ] Consumo de estadísticas
-3. [ ] Panel de productor
-4. [ ] Tabla de consumidores
-5. [ ] Gráfica de progreso
-6. [ ] Gráfica de tasas
-7. [ ] **DECISIÓN**: Gráficas adicionales necesarias
-8. [ ] Tests de integración
-
-**Entregables:**
-- Dashboard funcional
-- Actualización en tiempo real
-
-### Fase 5: Integración y Testing (Semana 5)
-
-**Objetivos:**
-- Pruebas end-to-end
-
-**Tareas:**
-1. [ ] Tests de integración completos
-2. [ ] Pruebas de carga
-3. [ ] Manejo de fallos
-4. [ ] Optimización de rendimiento
-5. [ ] Documentación de código
-
-**Entregables:**
-- Sistema completo funcionando
-- Documentación completa
-
-### Fase 6: Deployment (Semana 6)
-
-**Objetivos:**
-- Despliegue del sistema
-
-**Tareas:**
-1. [ ] Dockerizar componentes
-2. [ ] Docker Compose completo
-3. [ ] Scripts de inicialización
-4. [ ] Documentación de usuario
-5. [ ] Ejemplos de uso
-
-**Entregables:**
-- Sistema desplegable
-- Manual de usuario
+**Horas estimadas**: 16h (8h/día x 2 días)
 
 ---
 
-## ❓ Preguntas Pendientes
+### **FASE 2: Dashboard y Monitoreo (Día 3) - 1 día** 📊
 
-### Críticas (Bloquean Implementación)
+**Objetivo**: Visualización del progreso en tiempo real
 
-1. **Formato de la Función del Modelo**
-   - [ ] ¿Código Python embebido?
-   - [ ] ¿Expresión matemática?
-   - [ ] ¿Módulo externo?
-   - [ ] ¿Combinación?
+**Tareas**:
+- [ ] Estadísticas del productor
+  - [ ] Calcular progreso, tasa generación, ETA
+  - [ ] Publicar stats en cola_stats_productor cada 1s
+  - [ ] Tests de cálculo métricas
 
-2. **Política Time-out Delivery**
-   - [ ] ¿Qué significa exactamente?
-   - [ ] ¿Cómo se implementa en RabbitMQ?
-   - [ ] ¿Timeout específico?
+- [ ] Estadísticas de consumidores
+  - [ ] Calcular procesados, tasa, tiempo último
+  - [ ] Publicar stats en cola_stats_consumidores cada 2s
+  - [ ] Tests métricas consumidor
 
-3. **Caducidad del Modelo**
-   - [ ] ¿Purgar cola al publicar nuevo modelo?
-   - [ ] ¿TTL automático?
-   - [ ] ¿Otro mecanismo?
+- [ ] Dashboard Dash básico
+  - [ ] Setup app Dash + layout básico
+  - [ ] Consumidor de stats en thread separado
+  - [ ] Panel productor (texto + barra progreso)
+  - [ ] Tabla consumidores (ID, procesados, tasa, estado)
+  - [ ] Auto-refresh cada 2 segundos (dcc.Interval)
 
-4. **Seguridad de Ejecución**
-   - [ ] ¿Sandbox para exec()?
-   - [ ] ¿Restricciones de imports?
-   - [ ] ¿Timeout de ejecución?
-   - [ ] ¿Validación de código?
+- [ ] Gráficas esenciales
+  - [ ] Gauge de progreso (Plotly Indicator)
+  - [ ] Línea de tasa de procesamiento
+  - [ ] Barras de estado de colas RabbitMQ
 
-### Importantes (Afectan Diseño)
+**Entregables**:
+- ✅ Dashboard funcional en http://localhost:8050
+- ✅ Actualización en tiempo real
+- ✅ 4 componentes visuales
 
-5. **Distribuciones de Probabilidad**
-   - [ ] ¿Lista específica de distribuciones?
-   - [ ] ¿Solo las de scipy.stats?
-   - [ ] ¿Distribuciones personalizadas?
-
-6. **Tipo de Resultado**
-   - [ ] ¿Solo float?
-   - [ ] ¿Puede ser dict/array?
-   - [ ] ¿Múltiples outputs?
-
-7. **Gráficas del Dashboard**
-   - [ ] ¿Qué gráficas adicionales?
-   - [ ] ¿Mostrar distribución de resultados?
-   - [ ] ¿Estadísticas de RabbitMQ?
-
-8. **Almacenamiento de Resultados**
-   - [ ] ¿Solo en cola o también en DB/archivo?
-   - [ ] ¿Análisis posterior de resultados?
-   - [ ] ¿Formato de exportación?
-
-### Deseables (Mejoras Futuras)
-
-9. **Validación de Modelos**
-   - [ ] ¿Ejecutar test antes de publicar?
-   - [ ] ¿Valores de ejemplo en archivo?
-
-10. **Recursos del Sistema**
-    - [ ] ¿Monitorear CPU/memoria?
-    - [ ] ¿Limitar recursos por consumidor?
-
-11. **Persistencia**
-    - [ ] ¿Guardar histórico de simulaciones?
-    - [ ] ¿Reiniciar simulación interrumpida?
-
-12. **Escalabilidad**
-    - [ ] ¿Número máximo de consumidores?
-    - [ ] ¿Límite de escenarios por simulación?
+**Horas estimadas**: 8h (1 día)
 
 ---
 
-## 📞 Siguiente Paso
+### **FASE 3: Funciones Avanzadas (Día 4) - 1 día** 🔐
 
-**Por favor, responde las preguntas críticas para continuar con la implementación:**
+**Objetivo**: Soporte para código Python y más distribuciones
 
-1. ¿Qué formato prefieres para especificar la función del modelo?
-2. ¿Qué significa "time-out delivery" en el contexto del proyecto?
-3. ¿Cómo debe manejarse la caducidad del modelo al cargar uno nuevo?
-4. ¿Qué medidas de seguridad se requieren al ejecutar código arbitrario?
-5. ¿Qué distribuciones de probabilidad deben soportarse?
-6. ¿Qué información adicional debe mostrar el dashboard?
+**Tareas**:
+- [ ] Ejecutor de código Python seguro
+  - [ ] Integrar RestrictedPython
+  - [ ] Whitelist imports (math, numpy básico)
+  - [ ] Timeout decorator (30s)
+  - [ ] Namespace seguro con safe_globals
+  - [ ] Tests de seguridad (intentar código malicioso)
+
+- [ ] Distribuciones adicionales
+  - [ ] Lognormal (mu, sigma)
+  - [ ] Triangular (left, mode, right)
+  - [ ] Binomial (n, p)
+  - [ ] Tests de las 6 distribuciones
+
+- [ ] Actualizar parser
+  - [ ] Soporte tipo="codigo" en sección [FUNCION]
+  - [ ] Validación sintaxis Python básica
+  - [ ] Tests de parsing código Python
+
+- [ ] Ejemplo complejo
+  - [ ] Modelo con función def modelo()
+  - [ ] Usar las 6 distribuciones
+  - [ ] Validar ejecución correcta
+
+**Entregables**:
+- ✅ Funciones Python complejas ejecutándose
+- ✅ 6 distribuciones de probabilidad
+- ✅ Validación de seguridad implementada
+
+**Horas estimadas**: 8h (1 día)
+
+---
+
+### **FASE 4: Robustez y Producción (Día 5-6) - 2 días** 🛡️
+
+**Objetivo**: Sistema confiable, robusto y listo para uso real
+
+**Tareas**:
+- [ ] Manejo de errores avanzado
+  - [ ] Dead Letter Queue (DLQ) para mensajes fallidos
+  - [ ] Reintentos automáticos (máx 3 intentos)
+  - [ ] Logging estructurado (logging.config)
+  - [ ] Manejo excepciones en consumidor
+
+- [ ] Configuración óptima RabbitMQ
+  - [ ] Prefetch count = 1 (fair dispatch)
+  - [ ] Persistencia de mensajes
+  - [ ] Heartbeat configuration
+  - [ ] Connection pooling
+
+- [ ] Exportación de resultados
+  - [ ] Consumir cola_resultados en dashboard
+  - [ ] Almacenar resultados en memoria
+  - [ ] Exportar a JSON
+  - [ ] Exportar a CSV (con pandas)
+  - [ ] Botón de descarga en dashboard
+
+- [ ] Tests de integración
+  - [ ] Test con 10,000 escenarios
+  - [ ] Test con 5 consumidores paralelos
+  - [ ] Test de recuperación ante fallo de consumidor
+  - [ ] Test de cambio de modelo (purga correcta)
+
+- [ ] Optimizaciones
+  - [ ] Validar uso de memoria
+  - [ ] Optimizar tamaño de mensajes
+  - [ ] Ajustar intervalos de stats
+
+**Entregables**:
+- ✅ Sistema robusto con DLQ y reintentos
+- ✅ Exportación de resultados funcional
+- ✅ Tests de carga pasando
+
+**Horas estimadas**: 16h (8h/día x 2 días)
+
+---
+
+### **FASE 5: Deployment y Documentación (Día 7) - 1 día** 🐳
+
+**Objetivo**: Sistema desplegable y completamente documentado
+
+**Tareas**:
+- [ ] Dockerización completa
+  - [ ] Dockerfile.producer
+  - [ ] Dockerfile.consumer
+  - [ ] Dockerfile.dashboard
+  - [ ] docker-compose.yml completo (4 servicios)
+  - [ ] Variables de entorno (.env.example)
+  - [ ] Health checks en compose
+
+- [ ] Scripts de automatización
+  - [ ] start.sh (levantar todo el sistema)
+  - [ ] stop.sh (detener y limpiar)
+  - [ ] clean_queues.sh (purgar colas)
+  - [ ] run_simulation.sh (ejecutar simulación)
+
+- [ ] Documentación de usuario
+  - [ ] Actualizar README con Quick Start
+  - [ ] Guía de instalación paso a paso
+  - [ ] 2 ejemplos funcionales documentados
+  - [ ] Troubleshooting común
+  - [ ] Arquitectura final (diagrama)
+
+- [ ] Tests finales
+  - [ ] Test end-to-end completo con Docker
+  - [ ] Test con docker-compose up
+  - [ ] Validar en sistema limpio
+
+- [ ] Cleanup del código
+  - [ ] Docstrings completos
+  - [ ] Remover código comentado
+  - [ ] Formatear con black/autopep8
+  - [ ] Linting con flake8
+
+**Entregables**:
+- ✅ Sistema completamente dockerizado
+- ✅ `docker-compose up` funciona en <2 min
+- ✅ README actualizado con Quick Start
+- ✅ 2 ejemplos completos
+- ✅ Tests E2E pasando
+
+**Horas estimadas**: 8h (1 día)
+
+---
+
+## ⏱️ **Timeline Visual (1 Semana)**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PLAN DE 7 DÍAS                                │
+├─────────────────────────────────────────────────────────────────┤
+│ DÍA 1-2 │ FASE 1: MVP Funcional                                 │
+│         │ ✅ Productor + Consumidor + Expresiones                │
+├─────────────────────────────────────────────────────────────────┤
+│ DÍA 3   │ FASE 2: Dashboard                                     │
+│         │ ✅ Visualización en tiempo real                        │
+├─────────────────────────────────────────────────────────────────┤
+│ DÍA 4   │ FASE 3: Funciones Avanzadas                           │
+│         │ ✅ Código Python + 6 distribuciones                    │
+├─────────────────────────────────────────────────────────────────┤
+│ DÍA 5-6 │ FASE 4: Robustez                                      │
+│         │ ✅ DLQ + Exportación + Tests                           │
+├─────────────────────────────────────────────────────────────────┤
+│ DÍA 7   │ FASE 5: Deployment                                    │
+│         │ ✅ Docker + Docs + E2E Tests                           │
+└─────────────────────────────────────────────────────────────────┘
+
+Total: 56 horas de desarrollo (8h/día)
+```
+
+---
+
+## 🎯 Métricas de Éxito (Día 7 - 18:00)
+
+El sistema debe cumplir:
+
+1. ✅ **Funcionalidad**: Ejecutar 10,000 escenarios con 5 consumidores
+2. ✅ **Performance**: Completar simulación en <5 minutos
+3. ✅ **Dashboard**: Actualización en tiempo real cada 2s
+4. ✅ **Robustez**: Recuperarse de fallo de 2 consumidores
+5. ✅ **Deployment**: `docker-compose up` funcional en <2 minutos
+6. ✅ **Documentación**: Quick Start + 2 ejemplos ejecutables
+7. ✅ **Tests**: Cobertura >70% en componentes críticos
+
+---
+
+## 🔥 Estrategia de Ejecución
+
+### Prioridades
+1. **Funcionalidad antes que perfección**: MVP primero, pulir después
+2. **Tests pragmáticos**: Solo casos críticos, no 100% cobertura
+3. **Documentación en código**: Docstrings > docs extensos
+4. **Reutilizar**: Ejemplos oficiales de RabbitMQ/Dash
+
+### Plan de Contingencia
+- **Día 3 atrasado** → Simplificar dashboard (solo logs)
+- **Día 4 atrasado** → Skip código Python (solo expresiones)
+- **Día 5 atrasado** → Skip DLQ (solo logging)
+- **Día 6 atrasado** → Reducir tests
+- **Día 7 atrasado** → Docker Compose mínimo
+
+---
+
+## ✅ Decisiones Técnicas (RESUELTAS)
+
+### 1. Formato de la Función del Modelo ✅
+
+**DECISIÓN**: Enfoque híbrido con 2 opciones (Fase 1: expresiones, Fase 3: código Python)
+
+```ini
+# Opción A: Expresión matemática simple (FASE 1)
+[FUNCION]
+tipo = expresion
+expresion = x**2 + y*z - w + v/n
+
+# Opción B: Código Python validado (FASE 3)
+[FUNCION]
+tipo = codigo
+codigo = """
+def modelo(x, y, z):
+    resultado = x**2 + y*z
+    return resultado
+"""
+```
+
+**Justificación**: Expresiones son más seguras para MVP, código Python añade flexibilidad después.
+
+---
+
+### 2. Política Time-out Delivery ✅
+
+**DECISIÓN**: Interpretación como "Entrega con timeout de lectura"
+
+```python
+# Cola configurada sin TTL automático
+channel.queue_declare(
+    queue='cola_modelo',
+    durable=True,
+    arguments={
+        'x-max-length': 1,  # Solo 1 modelo activo
+        'x-single-active-consumer': False  # Múltiples consumidores leen
+    }
+)
+
+# Consumidores leen con timeout al iniciar
+method, properties, body = channel.basic_get(
+    queue='cola_modelo',
+    auto_ack=False
+)
+```
+
+**Justificación**: Cada consumidor lee el modelo una vez al iniciar, sin expiración automática.
+
+---
+
+### 3. Caducidad del Modelo ✅
+
+**DECISIÓN**: Purgar cola + Version ID al publicar nuevo modelo
+
+```python
+def publicar_modelo(self, modelo):
+    # 1. Purgar modelo anterior
+    self.channel.queue_purge('cola_modelo')
+
+    # 2. Publicar nuevo modelo con ID único
+    mensaje = {
+        'modelo_id': f"{modelo['nombre']}_{timestamp}",
+        'version': modelo['version'],
+        'timestamp': time.time(),
+        # ... resto del modelo
+    }
+
+    self.channel.basic_publish(
+        exchange='',
+        routing_key='cola_modelo',
+        body=json.dumps(mensaje),
+        properties=pika.BasicProperties(delivery_mode=2)
+    )
+```
+
+**Justificación**: Simple y predecible. Consumidores nuevos siempre obtienen el modelo actual.
+
+---
+
+### 4. Seguridad de Ejecución ✅
+
+**DECISIÓN**: Enfoque por fases
+
+**FASE 1** - Expresiones matemáticas (AST seguro):
+```python
+import ast
+import operator
+
+ALLOWED_OPS = {
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.USub
+}
+
+def evaluar_expresion_segura(expresion, variables):
+    """Evalúa expresión matemática usando AST."""
+    tree = ast.parse(expresion, mode='eval')
+    validar_ast(tree)  # Solo operaciones permitidas
+    return evaluar_nodo(tree.body, variables)
+```
+
+**FASE 3** - Código Python (RestrictedPython):
+```python
+from RestrictedPython import compile_restricted, safe_globals
+import timeout_decorator
+
+@timeout_decorator.timeout(30)  # Timeout 30s
+def ejecutar_codigo_restringido(codigo, variables):
+    byte_code = compile_restricted(codigo, '<string>', 'exec')
+    safe_namespace = {
+        '__builtins__': safe_globals,
+        'math': math,  # Solo módulos permitidos
+    }
+    exec(byte_code, safe_namespace)
+    return safe_namespace['modelo'](**variables)
+```
+
+**Medidas de seguridad**:
+- ✅ Whitelist de operaciones/imports
+- ✅ Timeout de ejecución (30s)
+- ✅ Sin acceso a sistema de archivos
+- ✅ Validación AST antes de ejecutar
+
+---
+
+### 5. Distribuciones de Probabilidad ✅
+
+**DECISIÓN**: 6 distribuciones estándar usando scipy.stats
+
+| Distribución | Parámetros | Fase |
+|--------------|------------|------|
+| Normal | media, std | Fase 1 |
+| Uniforme | min, max | Fase 1 |
+| Exponencial | lambda | Fase 1 |
+| Lognormal | mu, sigma | Fase 3 |
+| Triangular | left, mode, right | Fase 3 |
+| Binomial | n, p | Fase 3 |
+
+**Justificación**: Cubren 95% de casos de uso, todas disponibles en scipy.stats.
+
+---
+
+### 6. Tipo de Resultado ✅
+
+**DECISIÓN**: Soportar `float`, `int`, y `dict` (sin arrays por ahora)
+
+```python
+# Ejemplos válidos
+return 42.5           # float
+return 100            # int
+return {'valor': 42.5, 'categoria': 'A'}  # dict
+```
+
+**Justificación**: Flexibilidad para resultados simples y múltiples outputs.
+
+---
+
+### 7. Gráficas del Dashboard ✅
+
+**DECISIÓN**: 4 gráficas esenciales
+
+1. **Progreso de simulación** (gauge): Escenarios generados vs total
+2. **Tasa de procesamiento** (línea): Velocidad productor vs consumidores
+3. **Tabla de consumidores**: Estado individual de cada consumidor
+4. **Estado de colas RabbitMQ** (barras): Mensajes pendientes
+
+**Justificación**: Balance entre información útil y simplicidad de implementación.
+
+---
+
+### 8. Almacenamiento de Resultados ✅
+
+**DECISIÓN**: Cola RabbitMQ + Exportación a JSON/CSV
+
+```python
+# En dashboard: consumir resultados y exportar
+def exportar_resultados(resultados, formato='json'):
+    if formato == 'json':
+        with open('resultados.json', 'w') as f:
+            json.dump(resultados, f)
+    elif formato == 'csv':
+        df = pd.DataFrame(resultados)
+        df.to_csv('resultados.csv', index=False)
+```
+
+**Justificación**: No requiere base de datos adicional, suficiente para análisis posterior.
+
+---
+
+### 9-12. Funcionalidades Deseables ✅
+
+**DECISIÓN**: Fuera del scope de la semana 1
+
+- ⏸️ Validación de modelos con test cases (Mejora futura)
+- ⏸️ Monitoreo CPU/memoria por consumidor (Mejora futura)
+- ⏸️ Persistencia de historial (Mejora futura)
+- ⏸️ Límites de escalabilidad: 100 consumidores / 100k escenarios (suficiente para V1)
+
+---
+
+## 🚀 Inicio de Implementación
+
+### Estado del Proyecto: ✅ LISTO PARA DESARROLLO
+
+Todas las preguntas críticas han sido resueltas. El sistema está completamente especificado y listo para implementación.
+
+### Próximos Pasos Inmediatos
+
+1. **DÍA 1 - Mañana (08:00-12:00)**
+   ```bash
+   # Setup del proyecto
+   mkdir -p VarP/{src,modelos,tests,docker}
+   cd VarP
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install pika numpy scipy
+   ```
+
+2. **DÍA 1 - Tarde (13:00-18:00)**
+   ```bash
+   # Levantar RabbitMQ
+   docker-compose up -d rabbitmq
+   # Abrir Management UI: http://localhost:15672
+   # Credenciales: admin/password
+
+   # Comenzar desarrollo del parser
+   touch src/parser/model_parser.py
+   ```
+
+### Comandos Rápidos
+
+```bash
+# Iniciar desarrollo
+git checkout -b feature/fase-1-mvp
+docker-compose up -d rabbitmq
+
+# Verificar RabbitMQ
+curl -u admin:password http://localhost:15672/api/overview
+
+# Ejecutar tests
+pytest tests/ -v
+
+# Al final del día 7
+docker-compose up  # Todo el sistema
+```
+
+### Checklist Pre-Desarrollo
+
+- [x] README actualizado con decisiones técnicas
+- [x] Plan de 5 fases en 1 semana definido
+- [x] Todas las preguntas críticas resueltas
+- [x] Stack tecnológico definido
+- [ ] Entorno de desarrollo configurado (Día 1 - mañana)
+- [ ] RabbitMQ funcionando (Día 1 - mañana)
+
+### Recursos Útiles
+
+- **RabbitMQ Docs**: https://www.rabbitmq.com/tutorials/tutorial-one-python.html
+- **Pika Docs**: https://pika.readthedocs.io/
+- **Dash Docs**: https://dash.plotly.com/
+- **RestrictedPython**: https://restrictedpython.readthedocs.io/
+- **AST Module**: https://docs.python.org/3/library/ast.html
+
+---
+
+## 📊 Resumen Ejecutivo
+
+### Cumplimiento de Requisitos: ✅ 100%
+
+| Componente | Estado | Descripción |
+|------------|--------|-------------|
+| Productor único | ✅ Especificado | Genera escenarios únicos desde modelo .ini |
+| Modelo desde archivo | ✅ Especificado | Parser .ini con expresiones + código Python |
+| Variables estocásticas | ✅ Especificado | 6 distribuciones de probabilidad |
+| RabbitMQ | ✅ Especificado | 5 colas configuradas |
+| Cola de modelo | ✅ Especificado | Time-out delivery + purga al actualizar |
+| Consumidores | ✅ Especificado | Leen modelo 1 vez + ejecutan escenarios |
+| Dashboard | ✅ Especificado | Dash con actualización cada 2s |
+| Stats productor | ✅ Especificado | Progreso, tasa, ETA |
+| Stats consumidores | ✅ Especificado | Individual por consumer_id |
+
+### Timeline: 1 Semana (56 horas)
+
+- **Días 1-2**: MVP Funcional (Productor + Consumidor)
+- **Día 3**: Dashboard en tiempo real
+- **Día 4**: Funciones Python + 6 distribuciones
+- **Días 5-6**: Robustez (DLQ + Tests + Exportación)
+- **Día 7**: Deployment (Docker + Docs)
+
+### Entregables Finales (Día 7 - 18:00)
+
+1. ✅ Sistema funcionando con `docker-compose up`
+2. ✅ 10,000 escenarios procesados en <5 minutos
+3. ✅ Dashboard web en http://localhost:8050
+4. ✅ 2 ejemplos documentados
+5. ✅ Tests con cobertura >70%
+6. ✅ Exportación JSON/CSV
+
+---
+
+**Última actualización**: 2025-01-17
+**Versión del documento**: 2.0 (Plan de 1 semana)
+**Estado**: ✅ Listo para implementación
 
 ---
