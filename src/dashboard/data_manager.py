@@ -8,8 +8,11 @@ el estado actualizado para el dashboard.
 import threading
 import time
 import logging
+import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+
+import numpy as np
 
 from src.common.rabbitmq_client import RabbitMQClient
 from src.common.config import QueueConfig
@@ -45,6 +48,11 @@ class DataManager:
 
         # Estado de colas
         self.queue_sizes: Dict[str, int] = {}
+
+        # Resultados de la simulación
+        self.resultados: List[float] = []  # Lista de valores de resultado
+        self.resultados_raw: List[Dict[str, Any]] = []  # Últimos 1000 resultados completos
+        self.estadisticas: Dict[str, Any] = {}  # Estadísticas calculadas
 
         # Thread control
         self._stop_event = threading.Event()
@@ -90,6 +98,9 @@ class DataManager:
 
                 # Consumir stats de consumidores
                 self._consume_stats_consumidores()
+
+                # Consumir resultados
+                self._consume_resultados()
 
                 # Actualizar tamaños de colas
                 self._update_queue_sizes()
@@ -174,6 +185,82 @@ class DataManager:
 
         except Exception as e:
             logger.error(f"Error consumiendo stats consumidores: {e}")
+
+    def _consume_resultados(self) -> None:
+        """Consume resultados de la simulación y calcula estadísticas."""
+        try:
+            # Consumir todos los resultados disponibles
+            nuevos_resultados = 0
+            while True:
+                resultado_msg = self.client.get_message(
+                    QueueConfig.RESULTADOS,
+                    auto_ack=True
+                )
+
+                if not resultado_msg:
+                    break
+
+                resultado_valor = resultado_msg.get('resultado')
+                if resultado_valor is None:
+                    continue
+
+                with self._lock:
+                    # Agregar valor a lista de resultados
+                    self.resultados.append(float(resultado_valor))
+
+                    # Agregar resultado completo a lista raw (mantener últimos 1000)
+                    self.resultados_raw.append(resultado_msg)
+                    if len(self.resultados_raw) > 1000:
+                        self.resultados_raw.pop(0)
+
+                nuevos_resultados += 1
+
+                # Pequeña pausa entre mensajes
+                time.sleep(0.001)
+
+            # Si hubo nuevos resultados, recalcular estadísticas
+            if nuevos_resultados > 0:
+                self._calcular_estadisticas()
+                logger.debug(f"{nuevos_resultados} nuevos resultados procesados (total: {len(self.resultados)})")
+
+        except Exception as e:
+            logger.error(f"Error consumiendo resultados: {e}")
+
+    def _calcular_estadisticas(self) -> None:
+        """Calcula estadísticas descriptivas de los resultados."""
+        try:
+            with self._lock:
+                if not self.resultados:
+                    self.estadisticas = {}
+                    return
+
+                resultados_array = np.array(self.resultados)
+
+                self.estadisticas = {
+                    'n': len(self.resultados),
+                    'media': float(np.mean(resultados_array)),
+                    'mediana': float(np.median(resultados_array)),
+                    'desviacion_estandar': float(np.std(resultados_array)),
+                    'varianza': float(np.var(resultados_array)),
+                    'minimo': float(np.min(resultados_array)),
+                    'maximo': float(np.max(resultados_array)),
+                    'percentil_25': float(np.percentile(resultados_array, 25)),
+                    'percentil_75': float(np.percentile(resultados_array, 75)),
+                    'percentil_95': float(np.percentile(resultados_array, 95)),
+                    'percentil_99': float(np.percentile(resultados_array, 99)),
+                }
+
+                # Calcular intervalo de confianza 95% (media ± 1.96 * std/sqrt(n))
+                error_estandar = self.estadisticas['desviacion_estandar'] / np.sqrt(len(resultados_array))
+                self.estadisticas['intervalo_confianza_95'] = {
+                    'inferior': float(self.estadisticas['media'] - 1.96 * error_estandar),
+                    'superior': float(self.estadisticas['media'] + 1.96 * error_estandar)
+                }
+
+                logger.debug(f"Estadísticas calculadas: media={self.estadisticas['media']:.4f}, std={self.estadisticas['desviacion_estandar']:.4f}")
+
+        except Exception as e:
+            logger.error(f"Error calculando estadísticas: {e}")
 
     def _update_queue_sizes(self) -> None:
         """Actualiza los tamaños de las colas."""
@@ -269,6 +356,21 @@ class DataManager:
         with self._lock:
             return self.last_update
 
+    def get_resultados(self) -> List[float]:
+        """Retorna lista de todos los resultados."""
+        with self._lock:
+            return self.resultados.copy()
+
+    def get_resultados_raw(self) -> List[Dict[str, Any]]:
+        """Retorna últimos 1000 resultados completos."""
+        with self._lock:
+            return self.resultados_raw.copy()
+
+    def get_estadisticas(self) -> Dict[str, Any]:
+        """Retorna estadísticas descriptivas de los resultados."""
+        with self._lock:
+            return self.estadisticas.copy()
+
     def get_summary(self) -> Dict[str, Any]:
         """
         Retorna resumen del estado del sistema.
@@ -281,6 +383,7 @@ class DataManager:
             stats_cons = self.stats_consumidores.copy()
             modelo = self.modelo_info.copy()
             queues = self.queue_sizes.copy()
+            estadisticas = self.estadisticas.copy()
 
         # Calcular totales de consumidores
         total_procesados = sum(
@@ -298,9 +401,11 @@ class DataManager:
             'consumidores': stats_cons,
             'modelo': modelo,
             'queues': queues,
+            'estadisticas': estadisticas,
             'num_consumidores': len(stats_cons),
             'total_procesados': total_procesados,
             'tasa_total_consumidores': tasa_total_consumidores,
+            'num_resultados': len(self.resultados),
             'last_update': self.last_update
         }
 

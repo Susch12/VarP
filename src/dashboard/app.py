@@ -6,6 +6,10 @@ usando Dash y Plotly para visualización interactiva.
 """
 
 import logging
+import json
+import csv
+import io
+import base64
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -14,6 +18,7 @@ from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 import plotly.graph_objs as go
+import plotly.figure_factory as ff
 
 from src.dashboard.data_manager import DataManager
 from src.common.rabbitmq_client import RabbitMQClient
@@ -151,6 +156,74 @@ class MonteCarloDashboard:
                 ])
             ], className="mb-4"),
 
+            # Divider
+            html.Hr(),
+            html.H2("📈 Análisis de Resultados", className="text-primary mt-4 mb-4"),
+
+            # Panel de Estadísticas
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H4("📊 Estadísticas Descriptivas")),
+                        dbc.CardBody(id='estadisticas-panel')
+                    ])
+                ])
+            ], className="mb-4"),
+
+            # Gráficas de resultados
+            dbc.Row([
+                # Histograma
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("Distribución de Resultados")),
+                        dbc.CardBody([
+                            dcc.Graph(id='grafica-histograma')
+                        ])
+                    ])
+                ], width=8),
+
+                # Box plot
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("Box Plot")),
+                        dbc.CardBody([
+                            dcc.Graph(id='grafica-boxplot')
+                        ])
+                    ])
+                ], width=4),
+            ], className="mb-4"),
+
+            # Panel de Exportación
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("💾 Exportar Datos")),
+                        dbc.CardBody([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.P("Exportar resultados y estadísticas:", className="mb-3"),
+                                    dbc.ButtonGroup([
+                                        dbc.Button(
+                                            "📄 Descargar CSV",
+                                            id="btn-export-csv",
+                                            color="primary",
+                                            className="mr-2"
+                                        ),
+                                        dbc.Button(
+                                            "📋 Descargar JSON",
+                                            id="btn-export-json",
+                                            color="info"
+                                        ),
+                                    ]),
+                                    dcc.Download(id="download-csv"),
+                                    dcc.Download(id="download-json"),
+                                ])
+                            ])
+                        ])
+                    ])
+                ])
+            ], className="mb-4"),
+
             # Footer con última actualización
             dbc.Row([
                 dbc.Col([
@@ -172,6 +245,9 @@ class MonteCarloDashboard:
                 Output('grafica-progreso', 'figure'),
                 Output('grafica-tasas', 'figure'),
                 Output('grafica-colas', 'figure'),
+                Output('estadisticas-panel', 'children'),
+                Output('grafica-histograma', 'figure'),
+                Output('grafica-boxplot', 'figure'),
                 Output('last-update', 'children')
             ],
             [Input('interval-component', 'n_intervals')]
@@ -195,6 +271,8 @@ class MonteCarloDashboard:
                 historico_prod = self.data_manager.get_historico_productor()
                 historico_cons = self.data_manager.get_historico_consumidores()
                 queue_sizes = self.data_manager.get_queue_sizes()
+                estadisticas = self.data_manager.get_estadisticas()
+                resultados = self.data_manager.get_resultados()
                 last_update = self.data_manager.get_last_update()
 
                 # Generar componentes
@@ -202,12 +280,17 @@ class MonteCarloDashboard:
                 productor_comp = self._create_productor_panel(stats_prod)
                 consumidores_comp = self._create_consumidores_table(stats_cons)
 
-                # Generar gráficas
+                # Generar gráficas de monitoreo
                 grafica_progreso = self._create_progreso_gauge(stats_prod)
                 grafica_tasas = self._create_tasas_chart(
                     historico_prod, historico_cons
                 )
                 grafica_colas = self._create_colas_chart(queue_sizes)
+
+                # Generar componentes de análisis de resultados
+                estadisticas_comp = self._create_estadisticas_panel(estadisticas)
+                grafica_histograma = self._create_histograma_chart(resultados)
+                grafica_boxplot = self._create_boxplot_chart(resultados)
 
                 # Última actualización
                 if last_update:
@@ -222,6 +305,9 @@ class MonteCarloDashboard:
                     grafica_progreso,
                     grafica_tasas,
                     grafica_colas,
+                    estadisticas_comp,
+                    grafica_histograma,
+                    grafica_boxplot,
                     last_update_text
                 )
 
@@ -233,7 +319,96 @@ class MonteCarloDashboard:
                 empty_fig = go.Figure()
                 return (error_msg, error_msg, error_msg,
                        empty_fig, empty_fig, empty_fig,
+                       error_msg, empty_fig, empty_fig,
                        "Error en actualización")
+
+        # Callback para exportar CSV
+        @self.app.callback(
+            Output('download-csv', 'data'),
+            [Input('btn-export-csv', 'n_clicks')],
+            prevent_initial_call=True
+        )
+        def export_csv(n_clicks):
+            """Exporta resultados a CSV."""
+            try:
+                resultados_raw = self.data_manager.get_resultados_raw()
+                estadisticas = self.data_manager.get_estadisticas()
+
+                if not resultados_raw:
+                    return None
+
+                # Crear CSV en memoria
+                output = io.StringIO()
+                writer = csv.writer(output)
+
+                # Header
+                writer.writerow(['escenario_id', 'consumer_id', 'resultado', 'tiempo_ejecucion'])
+
+                # Datos
+                for res in resultados_raw:
+                    writer.writerow([
+                        res.get('escenario_id'),
+                        res.get('consumer_id'),
+                        res.get('resultado'),
+                        res.get('tiempo_ejecucion')
+                    ])
+
+                # Agregar estadísticas al final
+                writer.writerow([])
+                writer.writerow(['ESTADISTICAS'])
+                for key, value in estadisticas.items():
+                    if isinstance(value, dict):
+                        writer.writerow([key, json.dumps(value)])
+                    else:
+                        writer.writerow([key, value])
+
+                # Retornar para descarga
+                return dict(
+                    content=output.getvalue(),
+                    filename=f"resultados_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                )
+
+            except Exception as e:
+                logger.error(f"Error exportando CSV: {e}")
+                return None
+
+        # Callback para exportar JSON
+        @self.app.callback(
+            Output('download-json', 'data'),
+            [Input('btn-export-json', 'n_clicks')],
+            prevent_initial_call=True
+        )
+        def export_json(n_clicks):
+            """Exporta resultados y estadísticas a JSON."""
+            try:
+                resultados_raw = self.data_manager.get_resultados_raw()
+                estadisticas = self.data_manager.get_estadisticas()
+                modelo_info = self.data_manager.get_modelo_info()
+                stats_prod = self.data_manager.get_stats_productor()
+                stats_cons = self.data_manager.get_stats_consumidores()
+
+                # Crear estructura JSON
+                data = {
+                    'metadata': {
+                        'fecha_exportacion': datetime.now().isoformat(),
+                        'num_resultados': len(resultados_raw)
+                    },
+                    'modelo': modelo_info,
+                    'productor': stats_prod,
+                    'consumidores': stats_cons,
+                    'estadisticas': estadisticas,
+                    'resultados': resultados_raw
+                }
+
+                # Retornar para descarga
+                return dict(
+                    content=json.dumps(data, indent=2),
+                    filename=f"simulacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                )
+
+            except Exception as e:
+                logger.error(f"Error exportando JSON: {e}")
+                return None
 
     def _create_modelo_info(self, modelo_info: Dict[str, Any]) -> html.Div:
         """
@@ -572,6 +747,239 @@ class MonteCarloDashboard:
             height=250,
             margin=dict(l=40, r=20, t=20, b=80),
             xaxis={'tickangle': -45}
+        )
+
+        return fig
+
+    def _create_estadisticas_panel(self, estadisticas: Dict[str, Any]) -> html.Div:
+        """
+        Crea panel de estadísticas descriptivas.
+
+        Args:
+            estadisticas: Diccionario con estadísticas
+
+        Returns:
+            Componente Div con estadísticas
+        """
+        if not estadisticas:
+            return html.P("No hay resultados disponibles todavía. Las estadísticas aparecerán cuando los consumidores procesen escenarios.",
+                         className="text-muted")
+
+        # Extraer valores
+        n = estadisticas.get('n', 0)
+        media = estadisticas.get('media', 0)
+        mediana = estadisticas.get('mediana', 0)
+        std = estadisticas.get('desviacion_estandar', 0)
+        varianza = estadisticas.get('varianza', 0)
+        minimo = estadisticas.get('minimo', 0)
+        maximo = estadisticas.get('maximo', 0)
+        p25 = estadisticas.get('percentil_25', 0)
+        p75 = estadisticas.get('percentil_75', 0)
+        p95 = estadisticas.get('percentil_95', 0)
+        p99 = estadisticas.get('percentil_99', 0)
+        ic_95 = estadisticas.get('intervalo_confianza_95', {})
+
+        return html.Div([
+            # Primera fila: métricas principales
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{n:,}", className="text-primary"),
+                        html.P("Resultados", className="text-muted")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{media:.6f}", className="text-success"),
+                        html.P("Media", className="text-muted")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{mediana:.6f}", className="text-info"),
+                        html.P("Mediana", className="text-muted")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{std:.6f}", className="text-warning"),
+                        html.P("Desv. Estándar", className="text-muted")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{minimo:.6f}", className="text-secondary"),
+                        html.P("Mínimo", className="text-muted")
+                    ], className="text-center")
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.H4(f"{maximo:.6f}", className="text-secondary"),
+                        html.P("Máximo", className="text-muted")
+                    ], className="text-center")
+                ], width=2),
+            ], className="mb-4"),
+
+            html.Hr(),
+
+            # Segunda fila: percentiles
+            dbc.Row([
+                dbc.Col([
+                    html.Strong("Percentiles:"),
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.Span("P25: ", className="text-muted"),
+                        html.Span(f"{p25:.6f}")
+                    ])
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.Span("P75: ", className="text-muted"),
+                        html.Span(f"{p75:.6f}")
+                    ])
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.Span("P95: ", className="text-muted"),
+                        html.Span(f"{p95:.6f}")
+                    ])
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.Span("P99: ", className="text-muted"),
+                        html.Span(f"{p99:.6f}")
+                    ])
+                ], width=2),
+            ], className="mb-3"),
+
+            # Tercera fila: intervalo de confianza
+            dbc.Row([
+                dbc.Col([
+                    html.Strong("Intervalo de Confianza 95%:"),
+                ], width=3),
+                dbc.Col([
+                    html.Div([
+                        html.Span("[ "),
+                        html.Span(f"{ic_95.get('inferior', 0):.6f}", className="text-primary"),
+                        html.Span(" , "),
+                        html.Span(f"{ic_95.get('superior', 0):.6f}", className="text-primary"),
+                        html.Span(" ]")
+                    ])
+                ], width=9),
+            ], className="mb-3"),
+
+            # Cuarta fila: varianza
+            dbc.Row([
+                dbc.Col([
+                    html.Strong("Varianza:"),
+                ], width=3),
+                dbc.Col([
+                    html.Span(f"{varianza:.6f}")
+                ], width=9),
+            ])
+        ])
+
+    def _create_histograma_chart(self, resultados: List[float]) -> go.Figure:
+        """
+        Crea histograma de distribución de resultados.
+
+        Args:
+            resultados: Lista de resultados
+
+        Returns:
+            Figura de Plotly con histograma
+        """
+        if not resultados or len(resultados) == 0:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay resultados disponibles",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                height=400,
+                margin=dict(l=40, r=20, t=20, b=40),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            return fig
+
+        # Crear histograma
+        fig = go.Figure()
+
+        fig.add_trace(go.Histogram(
+            x=resultados,
+            nbinsx=min(50, max(10, len(resultados) // 20)),  # Bins adaptativo
+            marker_color='steelblue',
+            opacity=0.75,
+            name='Resultados'
+        ))
+
+        # Calcular y agregar línea de media
+        media = sum(resultados) / len(resultados)
+        fig.add_vline(
+            x=media,
+            line_dash="dash",
+            line_color="red",
+            annotation_text=f"Media: {media:.4f}",
+            annotation_position="top"
+        )
+
+        fig.update_layout(
+            xaxis_title="Valor",
+            yaxis_title="Frecuencia",
+            height=400,
+            margin=dict(l=40, r=20, t=40, b=40),
+            showlegend=False,
+            bargap=0.05
+        )
+
+        return fig
+
+    def _create_boxplot_chart(self, resultados: List[float]) -> go.Figure:
+        """
+        Crea box plot de resultados.
+
+        Args:
+            resultados: Lista de resultados
+
+        Returns:
+            Figura de Plotly con box plot
+        """
+        if not resultados or len(resultados) == 0:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay resultados",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                height=400,
+                margin=dict(l=40, r=20, t=20, b=40),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            return fig
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Box(
+            y=resultados,
+            name='Resultados',
+            marker_color='steelblue',
+            boxmean='sd'  # Mostrar media y desviación estándar
+        ))
+
+        fig.update_layout(
+            yaxis_title="Valor",
+            height=400,
+            margin=dict(l=40, r=20, t=20, b=40),
+            showlegend=False
         )
 
         return fig
