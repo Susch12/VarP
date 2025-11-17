@@ -1,9 +1,9 @@
 """
-Dashboard para monitoreo en tiempo real de simulación Monte Carlo.
+Dashboard para monitoreo en tiempo real de simulaciÃ³n Monte Carlo.
 
 Componentes:
-- DataManager: Gestor de datos en background que consume estadísticas de RabbitMQ
-- MonteCarloDashboard: Aplicación Dash con visualización en tiempo real
+- DataManager: Gestor de datos en background que consume estadÃ­sticas de RabbitMQ
+- MonteCarloDashboard: AplicaciÃ³n Dash con visualizaciÃ³n en tiempo real
 """
 
 from src.dashboard.data_manager import DataManager
