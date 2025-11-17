@@ -9,10 +9,12 @@ import threading
 import time
 import logging
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from collections import deque
 
 import numpy as np
+from scipy import stats
 
 from src.common.rabbitmq_client import RabbitMQClient
 from src.common.config import QueueConfig
@@ -53,6 +55,11 @@ class DataManager:
         self.resultados: List[float] = []  # Lista de valores de resultado
         self.resultados_raw: List[Dict[str, Any]] = []  # Últimos 1000 resultados completos
         self.estadisticas: Dict[str, Any] = {}  # Estadísticas calculadas
+
+        # Convergencia y análisis avanzado (Fase 2.3)
+        self.historico_convergencia: List[Dict[str, Any]] = []  # Media/varianza vs tiempo
+        self.tests_normalidad: Dict[str, Any] = {}  # Resultados de tests estadísticos
+        self.logs_sistema: deque = deque(maxlen=100)  # Últimos 100 logs
 
         # Thread control
         self._stop_event = threading.Event()
@@ -257,10 +264,134 @@ class DataManager:
                     'superior': float(self.estadisticas['media'] + 1.96 * error_estandar)
                 }
 
+                # Calcular convergencia (sin lock, ya estamos dentro del lock)
+                self._calcular_convergencia_internal(resultados_array)
+
+                # Calcular tests de normalidad (si hay suficientes datos)
+                if len(resultados_array) >= 20:
+                    self._calcular_tests_normalidad_internal(resultados_array)
+
                 logger.debug(f"Estadísticas calculadas: media={self.estadisticas['media']:.4f}, std={self.estadisticas['desviacion_estandar']:.4f}")
 
         except Exception as e:
             logger.error(f"Error calculando estadísticas: {e}")
+
+    def _calcular_convergencia_internal(self, resultados_array: np.ndarray) -> None:
+        """
+        Calcula convergencia de media y varianza vs tiempo.
+
+        NOTA: Este método debe ser llamado DENTRO de un lock.
+
+        Args:
+            resultados_array: Array de resultados
+        """
+        try:
+            n = len(resultados_array)
+
+            # Solo calcular si tenemos suficientes datos y es múltiplo de 10
+            if n < 30 or n % 10 != 0:
+                return
+
+            # Calcular media y varianza acumuladas
+            media_acum = float(np.mean(resultados_array))
+            var_acum = float(np.var(resultados_array))
+
+            # Agregar punto de convergencia
+            punto = {
+                'n': n,
+                'media': media_acum,
+                'varianza': var_acum,
+                'timestamp': time.time()
+            }
+
+            self.historico_convergencia.append(punto)
+
+            # Mantener solo últimos 100 puntos
+            if len(self.historico_convergencia) > 100:
+                self.historico_convergencia.pop(0)
+
+            # Agregar log
+            self._add_log_internal('info', f"Convergencia calculada: n={n}, media={media_acum:.4f}, var={var_acum:.4f}")
+
+        except Exception as e:
+            logger.error(f"Error calculando convergencia: {e}")
+
+    def _calcular_tests_normalidad_internal(self, resultados_array: np.ndarray) -> None:
+        """
+        Calcula tests de normalidad (Kolmogorov-Smirnov y Shapiro-Wilk).
+
+        NOTA: Este método debe ser llamado DENTRO de un lock.
+
+        Args:
+            resultados_array: Array de resultados
+        """
+        try:
+            n = len(resultados_array)
+
+            # Kolmogorov-Smirnov test
+            # Comparar con distribución normal con media y std de los datos
+            media = np.mean(resultados_array)
+            std = np.std(resultados_array)
+
+            # KS test contra N(media, std)
+            ks_statistic, ks_pvalue = stats.kstest(
+                resultados_array,
+                lambda x: stats.norm.cdf(x, loc=media, scale=std)
+            )
+
+            # Shapiro-Wilk test (solo si n <= 5000)
+            if n <= 5000:
+                sw_statistic, sw_pvalue = stats.shapiro(resultados_array)
+            else:
+                sw_statistic, sw_pvalue = None, None
+
+            # Almacenar resultados
+            self.tests_normalidad = {
+                'n': n,
+                'kolmogorov_smirnov': {
+                    'statistic': float(ks_statistic),
+                    'pvalue': float(ks_pvalue),
+                    'is_normal_alpha_05': ks_pvalue > 0.05,  # No rechazar H0
+                    'is_normal_alpha_01': ks_pvalue > 0.01
+                },
+                'shapiro_wilk': {
+                    'statistic': float(sw_statistic) if sw_statistic is not None else None,
+                    'pvalue': float(sw_pvalue) if sw_pvalue is not None else None,
+                    'is_normal_alpha_05': sw_pvalue > 0.05 if sw_pvalue is not None else None,
+                    'is_normal_alpha_01': sw_pvalue > 0.01 if sw_pvalue is not None else None
+                } if sw_statistic is not None else None,
+                'parametros': {
+                    'media_estimada': float(media),
+                    'std_estimada': float(std)
+                }
+            }
+
+            # Agregar log
+            resultado = "NORMAL" if ks_pvalue > 0.05 else "NO NORMAL"
+            self._add_log_internal('info', f"Test KS: p-value={ks_pvalue:.4f} → {resultado} (α=0.05)")
+
+        except Exception as e:
+            logger.error(f"Error calculando tests de normalidad: {e}")
+
+    def _add_log_internal(self, level: str, message: str) -> None:
+        """
+        Agrega un log al sistema.
+
+        NOTA: Este método debe ser llamado DENTRO de un lock.
+
+        Args:
+            level: Nivel del log (info, warning, error)
+            message: Mensaje del log
+        """
+        try:
+            log_entry = {
+                'timestamp': datetime.now(),
+                'level': level,
+                'message': message
+            }
+            self.logs_sistema.append(log_entry)
+        except Exception as e:
+            logger.error(f"Error agregando log: {e}")
 
     def _update_queue_sizes(self) -> None:
         """Actualiza los tamaños de las colas."""
@@ -370,6 +501,21 @@ class DataManager:
         """Retorna estadísticas descriptivas de los resultados."""
         with self._lock:
             return self.estadisticas.copy()
+
+    def get_historico_convergencia(self) -> List[Dict[str, Any]]:
+        """Retorna histórico de convergencia (media/varianza vs tiempo)."""
+        with self._lock:
+            return self.historico_convergencia.copy()
+
+    def get_tests_normalidad(self) -> Dict[str, Any]:
+        """Retorna resultados de tests de normalidad."""
+        with self._lock:
+            return self.tests_normalidad.copy()
+
+    def get_logs_sistema(self) -> List[Dict[str, Any]]:
+        """Retorna logs del sistema."""
+        with self._lock:
+            return list(self.logs_sistema)
 
     def get_summary(self) -> Dict[str, Any]:
         """

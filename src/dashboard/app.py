@@ -224,6 +224,58 @@ class MonteCarloDashboard:
                 ])
             ], className="mb-4"),
 
+            # Divider - Análisis Avanzado
+            html.Hr(),
+            html.H2("🔬 Análisis Avanzado", className="text-primary mt-4 mb-4"),
+
+            # Gráficas de Convergencia
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("Convergencia de Media")),
+                        dbc.CardBody([
+                            dcc.Graph(id='grafica-convergencia-media')
+                        ])
+                    ])
+                ], width=6),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("Convergencia de Varianza")),
+                        dbc.CardBody([
+                            dcc.Graph(id='grafica-convergencia-varianza')
+                        ])
+                    ])
+                ], width=6),
+            ], className="mb-4"),
+
+            # Tests de Normalidad y Q-Q Plot
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H4("🧪 Tests de Normalidad")),
+                        dbc.CardBody(id='tests-normalidad-panel')
+                    ])
+                ], width=6),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("Q-Q Plot")),
+                        dbc.CardBody([
+                            dcc.Graph(id='grafica-qqplot')
+                        ])
+                    ])
+                ], width=6),
+            ], className="mb-4"),
+
+            # Logs del Sistema
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("📋 Logs del Sistema")),
+                        dbc.CardBody(id='logs-panel', style={'maxHeight': '300px', 'overflowY': 'auto'})
+                    ])
+                ])
+            ], className="mb-4"),
+
             # Footer con última actualización
             dbc.Row([
                 dbc.Col([
@@ -248,6 +300,11 @@ class MonteCarloDashboard:
                 Output('estadisticas-panel', 'children'),
                 Output('grafica-histograma', 'figure'),
                 Output('grafica-boxplot', 'figure'),
+                Output('grafica-convergencia-media', 'figure'),
+                Output('grafica-convergencia-varianza', 'figure'),
+                Output('tests-normalidad-panel', 'children'),
+                Output('grafica-qqplot', 'figure'),
+                Output('logs-panel', 'children'),
                 Output('last-update', 'children')
             ],
             [Input('interval-component', 'n_intervals')]
@@ -273,6 +330,9 @@ class MonteCarloDashboard:
                 queue_sizes = self.data_manager.get_queue_sizes()
                 estadisticas = self.data_manager.get_estadisticas()
                 resultados = self.data_manager.get_resultados()
+                historico_conv = self.data_manager.get_historico_convergencia()
+                tests_normalidad = self.data_manager.get_tests_normalidad()
+                logs = self.data_manager.get_logs_sistema()
                 last_update = self.data_manager.get_last_update()
 
                 # Generar componentes
@@ -292,6 +352,13 @@ class MonteCarloDashboard:
                 grafica_histograma = self._create_histograma_chart(resultados)
                 grafica_boxplot = self._create_boxplot_chart(resultados)
 
+                # Generar componentes de análisis avanzado (Fase 2.3)
+                grafica_conv_media = self._create_convergencia_media_chart(historico_conv)
+                grafica_conv_var = self._create_convergencia_varianza_chart(historico_conv)
+                tests_norm_comp = self._create_tests_normalidad_panel(tests_normalidad)
+                grafica_qqplot = self._create_qqplot_chart(resultados, estadisticas)
+                logs_comp = self._create_logs_panel(logs)
+
                 # Última actualización
                 if last_update:
                     last_update_text = f"Última actualización: {last_update.strftime('%H:%M:%S')}"
@@ -308,6 +375,11 @@ class MonteCarloDashboard:
                     estadisticas_comp,
                     grafica_histograma,
                     grafica_boxplot,
+                    grafica_conv_media,
+                    grafica_conv_var,
+                    tests_norm_comp,
+                    grafica_qqplot,
+                    logs_comp,
                     last_update_text
                 )
 
@@ -320,6 +392,7 @@ class MonteCarloDashboard:
                 return (error_msg, error_msg, error_msg,
                        empty_fig, empty_fig, empty_fig,
                        error_msg, empty_fig, empty_fig,
+                       empty_fig, empty_fig, error_msg, empty_fig, error_msg,
                        "Error en actualización")
 
         # Callback para exportar CSV
@@ -983,6 +1056,325 @@ class MonteCarloDashboard:
         )
 
         return fig
+
+    def _create_convergencia_media_chart(self, historico_conv: List[Dict[str, Any]]) -> go.Figure:
+        """
+        Crea gráfica de convergencia de la media vs tiempo.
+
+        Args:
+            historico_conv: Histórico de convergencia
+
+        Returns:
+            Figura de Plotly con línea de convergencia
+        """
+        if not historico_conv or len(historico_conv) == 0:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos de convergencia disponibles",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(height=300, margin=dict(l=40, r=20, t=20, b=40))
+            return fig
+
+        n_values = [h['n'] for h in historico_conv]
+        media_values = [h['media'] for h in historico_conv]
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=n_values,
+            y=media_values,
+            mode='lines+markers',
+            name='Media',
+            line=dict(color='blue', width=2),
+            marker=dict(size=6)
+        ))
+
+        # Línea horizontal en y=0 (valor esperado teórico)
+        if len(media_values) > 0:
+            fig.add_hline(
+                y=0,
+                line_dash="dash",
+                line_color="red",
+                annotation_text="Media teórica = 0",
+                annotation_position="right"
+            )
+
+        fig.update_layout(
+            xaxis_title="Número de resultados (n)",
+            yaxis_title="Media",
+            height=300,
+            margin=dict(l=40, r=20, t=20, b=40),
+            showlegend=True
+        )
+
+        return fig
+
+    def _create_convergencia_varianza_chart(self, historico_conv: List[Dict[str, Any]]) -> go.Figure:
+        """
+        Crea gráfica de convergencia de la varianza vs tiempo.
+
+        Args:
+            historico_conv: Histórico de convergencia
+
+        Returns:
+            Figura de Plotly con línea de convergencia
+        """
+        if not historico_conv or len(historico_conv) == 0:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos de convergencia disponibles",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(height=300, margin=dict(l=40, r=20, t=20, b=40))
+            return fig
+
+        n_values = [h['n'] for h in historico_conv]
+        var_values = [h['varianza'] for h in historico_conv]
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=n_values,
+            y=var_values,
+            mode='lines+markers',
+            name='Varianza',
+            line=dict(color='green', width=2),
+            marker=dict(size=6)
+        ))
+
+        # Línea horizontal en y=2 (valor esperado teórico: Var(X+Y) = Var(X) + Var(Y) = 1 + 1 = 2)
+        if len(var_values) > 0:
+            fig.add_hline(
+                y=2,
+                line_dash="dash",
+                line_color="red",
+                annotation_text="Varianza teórica = 2",
+                annotation_position="right"
+            )
+
+        fig.update_layout(
+            xaxis_title="Número de resultados (n)",
+            yaxis_title="Varianza",
+            height=300,
+            margin=dict(l=40, r=20, t=20, b=40),
+            showlegend=True
+        )
+
+        return fig
+
+    def _create_tests_normalidad_panel(self, tests_normalidad: Dict[str, Any]) -> html.Div:
+        """
+        Crea panel con resultados de tests de normalidad.
+
+        Args:
+            tests_normalidad: Resultados de tests
+
+        Returns:
+            Componente Div con tests
+        """
+        if not tests_normalidad:
+            return html.P("Tests de normalidad se calcularán cuando haya al menos 20 resultados.",
+                         className="text-muted")
+
+        ks_test = tests_normalidad.get('kolmogorov_smirnov', {})
+        sw_test = tests_normalidad.get('shapiro_wilk')
+        n = tests_normalidad.get('n', 0)
+
+        return html.Div([
+            # Información general
+            dbc.Row([
+                dbc.Col([
+                    html.H6(f"Basado en {n:,} resultados", className="text-muted")
+                ])
+            ], className="mb-3"),
+
+            # Test Kolmogorov-Smirnov
+            dbc.Row([
+                dbc.Col([
+                    html.H6("📊 Test Kolmogorov-Smirnov", className="text-primary"),
+                    html.Hr(),
+                    html.P([
+                        html.Strong("Estadístico: "),
+                        html.Span(f"{ks_test.get('statistic', 0):.6f}")
+                    ]),
+                    html.P([
+                        html.Strong("p-value: "),
+                        html.Span(f"{ks_test.get('pvalue', 0):.6f}")
+                    ]),
+                    html.P([
+                        html.Strong("Conclusión (α=0.05): "),
+                        dbc.Badge(
+                            "NORMAL" if ks_test.get('is_normal_alpha_05') else "NO NORMAL",
+                            color="success" if ks_test.get('is_normal_alpha_05') else "danger"
+                        )
+                    ]),
+                    html.P([
+                        html.Strong("Conclusión (α=0.01): "),
+                        dbc.Badge(
+                            "NORMAL" if ks_test.get('is_normal_alpha_01') else "NO NORMAL",
+                            color="success" if ks_test.get('is_normal_alpha_01') else "danger"
+                        )
+                    ]),
+                ])
+            ], className="mb-3"),
+
+            # Test Shapiro-Wilk (si está disponible)
+            dbc.Row([
+                dbc.Col([
+                    html.H6("📊 Test Shapiro-Wilk", className="text-primary"),
+                    html.Hr(),
+                    html.Div([
+                        html.P([
+                            html.Strong("Estadístico: "),
+                            html.Span(f"{sw_test.get('statistic', 0):.6f}" if sw_test else "N/A (n > 5000)")
+                        ]),
+                        html.P([
+                            html.Strong("p-value: "),
+                            html.Span(f"{sw_test.get('pvalue', 0):.6f}" if sw_test else "N/A")
+                        ]),
+                        html.P([
+                            html.Strong("Conclusión (α=0.05): "),
+                            dbc.Badge(
+                                "NORMAL" if sw_test and sw_test.get('is_normal_alpha_05') else "NO NORMAL" if sw_test else "N/A",
+                                color="success" if sw_test and sw_test.get('is_normal_alpha_05') else "danger" if sw_test else "secondary"
+                            )
+                        ]) if sw_test else html.P("Test no disponible para n > 5000", className="text-muted"),
+                    ])
+                ])
+            ])
+        ])
+
+    def _create_qqplot_chart(self, resultados: List[float], estadisticas: Dict[str, Any]) -> go.Figure:
+        """
+        Crea Q-Q plot comparando resultados con distribución normal teórica.
+
+        Args:
+            resultados: Lista de resultados
+            estadisticas: Estadísticas calculadas
+
+        Returns:
+            Figura de Plotly con Q-Q plot
+        """
+        if not resultados or len(resultados) < 20:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Q-Q Plot requiere al menos 20 resultados",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(height=400, margin=dict(l=40, r=20, t=20, b=40))
+            return fig
+
+        # Ordenar resultados
+        resultados_sorted = np.sort(resultados)
+
+        # Calcular cuantiles teóricos de N(0, 1)
+        n = len(resultados_sorted)
+        theoretical_quantiles = stats.norm.ppf(np.linspace(0.01, 0.99, n))
+
+        # Estandarizar resultados (para comparar con N(0,1))
+        if estadisticas:
+            media = estadisticas.get('media', 0)
+            std = estadisticas.get('desviacion_estandar', 1)
+            if std > 0:
+                resultados_estandarizados = (resultados_sorted - media) / std
+            else:
+                resultados_estandarizados = resultados_sorted
+        else:
+            resultados_estandarizados = resultados_sorted
+
+        fig = go.Figure()
+
+        # Puntos Q-Q
+        fig.add_trace(go.Scatter(
+            x=theoretical_quantiles,
+            y=resultados_estandarizados,
+            mode='markers',
+            name='Cuantiles observados',
+            marker=dict(size=6, color='steelblue')
+        ))
+
+        # Línea de referencia (y = x)
+        min_val = min(theoretical_quantiles.min(), resultados_estandarizados.min())
+        max_val = max(theoretical_quantiles.max(), resultados_estandarizados.max())
+        fig.add_trace(go.Scatter(
+            x=[min_val, max_val],
+            y=[min_val, max_val],
+            mode='lines',
+            name='Referencia (normalidad perfecta)',
+            line=dict(color='red', dash='dash', width=2)
+        ))
+
+        fig.update_layout(
+            xaxis_title="Cuantiles teóricos (N(0,1))",
+            yaxis_title="Cuantiles observados (estandarizados)",
+            height=400,
+            margin=dict(l=40, r=20, t=40, b=40),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+
+        return fig
+
+    def _create_logs_panel(self, logs: List[Dict[str, Any]]) -> html.Div:
+        """
+        Crea panel de logs del sistema.
+
+        Args:
+            logs: Lista de logs
+
+        Returns:
+            Componente Div con logs
+        """
+        if not logs or len(logs) == 0:
+            return html.P("No hay logs disponibles todavía.", className="text-muted")
+
+        # Ordenar logs por timestamp (más reciente primero)
+        logs_sorted = sorted(logs, key=lambda x: x['timestamp'], reverse=True)
+
+        # Crear filas de logs
+        log_rows = []
+        for log in logs_sorted[:20]:  # Solo mostrar últimos 20
+            timestamp = log['timestamp'].strftime('%H:%M:%S')
+            level = log['level']
+            message = log['message']
+
+            # Color según nivel
+            if level == 'error':
+                badge_color = 'danger'
+            elif level == 'warning':
+                badge_color = 'warning'
+            else:
+                badge_color = 'info'
+
+            log_rows.append(
+                dbc.Row([
+                    dbc.Col([
+                        html.Small(timestamp, className="text-muted")
+                    ], width=2),
+                    dbc.Col([
+                        dbc.Badge(level.upper(), color=badge_color, className="mr-2")
+                    ], width=2),
+                    dbc.Col([
+                        html.Small(message)
+                    ], width=8),
+                ], className="mb-2")
+            )
+
+        return html.Div(log_rows)
 
     def start(self, host: str = '0.0.0.0', port: int = 8050,
               debug: bool = False) -> None:
