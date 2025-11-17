@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional
 from src.common.config import QueueConfig, ConsumerConfig
 from src.common.rabbitmq_client import RabbitMQClient, RabbitMQConnectionError
 from src.common.expression_evaluator import SafeExpressionEvaluator, ExpressionEvaluationError
+from src.common.python_executor import PythonExecutor, TimeoutException, SecurityException
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,15 @@ class Consumer:
         # Modelo
         self.modelo_cargado = False
         self.modelo_msg: Optional[Dict[str, Any]] = None
+        self.tipo_funcion: Optional[str] = None  # 'expresion' o 'codigo'
+
+        # Para tipo='expresion'
         self.evaluator: Optional[SafeExpressionEvaluator] = None
         self.expresion: Optional[str] = None
+
+        # Para tipo='codigo'
+        self.python_executor: Optional[PythonExecutor] = None
+        self.codigo: Optional[str] = None
 
         # Estadísticas
         self.escenarios_procesados = 0
@@ -133,28 +141,48 @@ class Consumer:
             persistent=True
         )
 
-        # Extraer expresión del modelo
-        funcion_tipo = self.modelo_msg['funcion']['tipo']
+        # Extraer tipo de función del modelo
+        self.tipo_funcion = self.modelo_msg['funcion']['tipo']
 
-        if funcion_tipo != 'expresion':
+        if self.tipo_funcion not in ['expresion', 'codigo']:
             raise ConsumerError(
-                f"Tipo de función '{funcion_tipo}' no soportado en Fase 1. "
-                f"Use tipo='expresion'"
+                f"Tipo de función '{self.tipo_funcion}' no soportado. "
+                f"Válidos: 'expresion', 'codigo'"
             )
 
-        self.expresion = self.modelo_msg['funcion']['expresion']
+        # Configurar según el tipo
+        if self.tipo_funcion == 'expresion':
+            # Usar expression evaluator
+            self.expresion = self.modelo_msg['funcion']['expresion']
+            self.evaluator = SafeExpressionEvaluator()
 
-        # Crear evaluador
-        self.evaluator = SafeExpressionEvaluator()
+            logger.info(
+                f"Consumidor {self.consumer_id}: Modelo cargado exitosamente\n"
+                f"  Modelo ID: {self.modelo_msg['modelo_id']}\n"
+                f"  Versión: {self.modelo_msg['version']}\n"
+                f"  Tipo: expresion\n"
+                f"  Expresión: {self.expresion}"
+            )
+
+        elif self.tipo_funcion == 'codigo':
+            # Usar Python executor (Fase 3)
+            self.codigo = self.modelo_msg['funcion']['codigo']
+            self.python_executor = PythonExecutor(timeout=30.0)
+
+            # Log solo primeras 5 líneas del código
+            codigo_preview = '\n'.join(self.codigo.split('\n')[:5])
+            if len(self.codigo.split('\n')) > 5:
+                codigo_preview += "\n..."
+
+            logger.info(
+                f"Consumidor {self.consumer_id}: Modelo cargado exitosamente\n"
+                f"  Modelo ID: {self.modelo_msg['modelo_id']}\n"
+                f"  Versión: {self.modelo_msg['version']}\n"
+                f"  Tipo: codigo\n"
+                f"  Código (preview):\n{codigo_preview}"
+            )
 
         self.modelo_cargado = True
-
-        logger.info(
-            f"Consumidor {self.consumer_id}: Modelo cargado exitosamente\n"
-            f"  Modelo ID: {self.modelo_msg['modelo_id']}\n"
-            f"  Versión: {self.modelo_msg['version']}\n"
-            f"  Expresión: {self.expresion}"
-        )
 
     def _procesar_escenario_callback(self, ch, method, properties, body) -> None:
         """
@@ -209,6 +237,20 @@ class Consumer:
             # NACK con requeue=False (enviar a DLQ si existe)
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
+        except TimeoutException as e:
+            logger.error(
+                f"Consumidor {self.consumer_id}: Timeout ejecutando código: {e}"
+            )
+            # NACK con requeue=False (código muy lento, no reintentar)
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+        except SecurityException as e:
+            logger.error(
+                f"Consumidor {self.consumer_id}: Código bloqueado por seguridad: {e}"
+            )
+            # NACK con requeue=False (código no seguro, no reintentar)
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
         except Exception as e:
             logger.error(
                 f"Consumidor {self.consumer_id}: Error procesando escenario: {e}",
@@ -219,21 +261,40 @@ class Consumer:
 
     def _ejecutar_modelo(self, escenario: Dict[str, Any]) -> Any:
         """
-        Ejecuta la expresión del modelo con los valores del escenario.
+        Ejecuta la función del modelo con los valores del escenario.
+
+        Soporta dos tipos:
+        - tipo='expresion': Evalúa expresión con SafeExpressionEvaluator
+        - tipo='codigo': Ejecuta código Python con PythonExecutor
 
         Args:
             escenario: Escenario con valores de variables
 
         Returns:
-            Resultado de evaluar la expresión
+            Resultado de evaluar la expresión o ejecutar el código
 
         Raises:
-            ExpressionEvaluationError: Si hay error evaluando
+            ExpressionEvaluationError: Si hay error evaluando expresión
+            TimeoutException: Si el código excede el timeout
+            SecurityException: Si el código contiene operaciones no permitidas
         """
         valores = escenario['valores']
 
-        # Evaluar expresión con valores del escenario
-        resultado = self.evaluator.evaluate(self.expresion, valores)
+        if self.tipo_funcion == 'expresion':
+            # Evaluar expresión con valores del escenario
+            resultado = self.evaluator.evaluate(self.expresion, valores)
+
+        elif self.tipo_funcion == 'codigo':
+            # Ejecutar código Python con valores del escenario
+            # El código debe definir una variable 'resultado' con el resultado final
+            resultado = self.python_executor.execute(
+                code=self.codigo,
+                variables=valores,
+                result_var='resultado'
+            )
+
+        else:
+            raise ConsumerError(f"Tipo de función desconocido: {self.tipo_funcion}")
 
         return resultado
 
