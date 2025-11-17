@@ -465,15 +465,13 @@ class Consumer:
             resultado: Resultado de la ejecución
             tiempo_ejecucion: Tiempo que tomó ejecutar el modelo
         """
+        # Optimización Fase 4: Mensaje simplificado (removida metadata redundante)
+        # Reduce tamaño de mensaje ~15-20%
         mensaje = {
             'escenario_id': escenario['escenario_id'],
             'consumer_id': self.consumer_id,
             'resultado': resultado,
-            'tiempo_ejecucion': tiempo_ejecucion,
-            'timestamp': time.time(),
-            'metadata': {
-                'version_modelo': self.modelo_msg['version']
-            }
+            'tiempo_ejecucion': tiempo_ejecucion
         }
 
         self.client.publish(

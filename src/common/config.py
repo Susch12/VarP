@@ -58,13 +58,17 @@ class QueueConfig:
 class ProducerConfig:
     """Configuración del productor."""
 
-    STATS_INTERVAL = int(os.getenv('PRODUCER_STATS_INTERVAL', '1'))
+    # Optimización Fase 4: Intervalo de stats aumentado de 1s a 5s
+    # Reduce mensajes de stats en 80% sin afectar monitoreo
+    STATS_INTERVAL = int(os.getenv('PRODUCER_STATS_INTERVAL', '5'))
 
 
 class ConsumerConfig:
     """Configuración del consumidor."""
 
-    STATS_INTERVAL = int(os.getenv('CONSUMER_STATS_INTERVAL', '2'))
+    # Optimización Fase 4: Intervalo de stats aumentado de 2s a 5s
+    # Reduce mensajes de stats en 60% sin afectar monitoreo
+    STATS_INTERVAL = int(os.getenv('CONSUMER_STATS_INTERVAL', '5'))
     PREFETCH_COUNT = int(os.getenv('CONSUMER_PREFETCH_COUNT', '1'))
     TIMEOUT = int(os.getenv('CONSUMER_TIMEOUT', '30'))
 

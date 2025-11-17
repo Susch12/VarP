@@ -55,8 +55,10 @@ class DataManager:
         self.queue_sizes: Dict[str, int] = {}
 
         # Resultados de la simulación
-        self.resultados: List[float] = []  # Lista de valores de resultado
-        self.resultados_raw: List[Dict[str, Any]] = []  # Últimos 1000 resultados completos
+        # Optimización Fase 4: Limitar memoria usando deque con maxlen
+        # self.resultados mantiene últimos 50,000 valores (suficiente para estadísticas confiables)
+        self.resultados: deque = deque(maxlen=50000)  # Últimos 50K valores para estadísticas
+        self.resultados_raw: deque = deque(maxlen=1000)  # Últimos 1000 resultados completos
         self.estadisticas: Dict[str, Any] = {}  # Estadísticas calculadas
 
         # Convergencia y análisis avanzado (Fase 2.3)
@@ -215,13 +217,11 @@ class DataManager:
                     continue
 
                 with self._lock:
-                    # Agregar valor a lista de resultados
+                    # Agregar valor a lista de resultados (deque limita automáticamente a 50K)
                     self.resultados.append(float(resultado_valor))
 
-                    # Agregar resultado completo a lista raw (mantener últimos 1000)
+                    # Agregar resultado completo a lista raw (deque limita automáticamente a 1000)
                     self.resultados_raw.append(resultado_msg)
-                    if len(self.resultados_raw) > 1000:
-                        self.resultados_raw.pop(0)
 
                 nuevos_resultados += 1
 
