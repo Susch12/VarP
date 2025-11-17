@@ -1,0 +1,464 @@
+"""
+Parser de archivos de modelo en formato .ini para simulación Monte Carlo.
+
+Lee y valida archivos de configuración que definen:
+- Metadata del modelo
+- Variables estocásticas con distribuciones
+- Función a ejecutar (expresiones o código Python)
+- Parámetros de simulación
+"""
+
+import configparser
+import re
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass, field
+
+
+class ModelParserError(Exception):
+    """Excepción para errores de parsing del modelo."""
+    pass
+
+
+@dataclass
+class Variable:
+    """Representa una variable estocástica del modelo."""
+    nombre: str
+    tipo: str  # 'float' o 'int'
+    distribucion: str  # 'normal', 'uniform', etc.
+    parametros: Dict[str, Any]
+
+    def __repr__(self):
+        return (f"Variable(nombre='{self.nombre}', tipo='{self.tipo}', "
+                f"distribucion='{self.distribucion}', parametros={self.parametros})")
+
+
+@dataclass
+class Modelo:
+    """Representa un modelo completo parseado."""
+    # Metadata
+    nombre: str
+    version: str
+    descripcion: str = ""
+    autor: str = ""
+    fecha_creacion: str = ""
+
+    # Variables
+    variables: List[Variable] = field(default_factory=list)
+
+    # Función
+    tipo_funcion: str = "expresion"  # 'expresion' o 'codigo'
+    expresion: Optional[str] = None
+    codigo: Optional[str] = None
+
+    # Simulación
+    numero_escenarios: int = 1000
+    semilla_aleatoria: Optional[int] = None
+
+    def __repr__(self):
+        return (f"Modelo(nombre='{self.nombre}', version='{self.version}', "
+                f"variables={len(self.variables)}, tipo='{self.tipo_funcion}')")
+
+
+class ModelParser:
+    """
+    Parser de archivos de modelo en formato .ini.
+
+    Lee archivos con secciones:
+    - [METADATA]: Información del modelo
+    - [VARIABLES]: Definición de variables estocásticas
+    - [FUNCION]: Función a ejecutar
+    - [SIMULACION]: Parámetros de simulación
+    """
+
+    REQUIRED_SECTIONS = ['METADATA', 'VARIABLES', 'FUNCION', 'SIMULACION']
+    VALID_TIPOS = {'float', 'int'}
+    VALID_DISTRIBUCIONES_FASE1 = {'normal', 'uniform', 'exponential'}
+
+    def __init__(self, filepath: str):
+        """
+        Inicializa el parser con un archivo de modelo.
+
+        Args:
+            filepath: Ruta al archivo .ini del modelo
+
+        Raises:
+            ModelParserError: Si el archivo no existe
+        """
+        self.filepath = Path(filepath)
+        if not self.filepath.exists():
+            raise ModelParserError(f"Archivo no encontrado: {filepath}")
+
+        self.config = configparser.ConfigParser(
+            allow_no_value=False,
+            inline_comment_prefixes='#'
+        )
+
+        try:
+            self.config.read(self.filepath, encoding='utf-8')
+        except Exception as e:
+            raise ModelParserError(f"Error leyendo archivo: {e}")
+
+    def parse(self) -> Modelo:
+        """
+        Parsea el archivo completo y retorna el modelo.
+
+        Returns:
+            Instancia de Modelo con toda la información parseada
+
+        Raises:
+            ModelParserError: Si hay errores en el formato o validación
+        """
+        # Verificar secciones requeridas
+        self._validate_sections()
+
+        # Parsear cada sección
+        metadata = self._parse_metadata()
+        variables = self._parse_variables()
+        funcion = self._parse_funcion()
+        simulacion = self._parse_simulacion()
+
+        # Construir modelo
+        modelo = Modelo(
+            # Metadata
+            nombre=metadata['nombre'],
+            version=metadata['version'],
+            descripcion=metadata.get('descripcion', ''),
+            autor=metadata.get('autor', ''),
+            fecha_creacion=metadata.get('fecha_creacion', ''),
+
+            # Variables
+            variables=variables,
+
+            # Función
+            tipo_funcion=funcion['tipo'],
+            expresion=funcion.get('expresion'),
+            codigo=funcion.get('codigo'),
+
+            # Simulación
+            numero_escenarios=simulacion['numero_escenarios'],
+            semilla_aleatoria=simulacion.get('semilla_aleatoria')
+        )
+
+        return modelo
+
+    def _validate_sections(self):
+        """
+        Valida que existan todas las secciones requeridas.
+
+        Raises:
+            ModelParserError: Si falta alguna sección
+        """
+        existing_sections = set(self.config.sections())
+        required_sections = set(self.REQUIRED_SECTIONS)
+        missing = required_sections - existing_sections
+
+        if missing:
+            raise ModelParserError(
+                f"Secciones faltantes en archivo: {missing}"
+            )
+
+    def _parse_metadata(self) -> Dict[str, str]:
+        """
+        Parsea la sección [METADATA].
+
+        Returns:
+            Diccionario con metadata del modelo
+
+        Raises:
+            ModelParserError: Si faltan campos requeridos
+        """
+        section = 'METADATA'
+        metadata = {}
+
+        # Campos requeridos
+        try:
+            metadata['nombre'] = self.config.get(section, 'nombre').strip()
+            metadata['version'] = self.config.get(section, 'version').strip()
+        except configparser.NoOptionError as e:
+            raise ModelParserError(f"Campo requerido faltante en [METADATA]: {e}")
+
+        # Campos opcionales
+        metadata['descripcion'] = self.config.get(
+            section, 'descripcion', fallback=''
+        ).strip()
+        metadata['autor'] = self.config.get(
+            section, 'autor', fallback=''
+        ).strip()
+        metadata['fecha_creacion'] = self.config.get(
+            section, 'fecha_creacion', fallback=''
+        ).strip()
+
+        return metadata
+
+    def _parse_variables(self) -> List[Variable]:
+        """
+        Parsea la sección [VARIABLES].
+
+        Formato esperado por línea:
+        nombre, tipo, distribucion, param1=val1, param2=val2, ...
+
+        Returns:
+            Lista de objetos Variable
+
+        Raises:
+            ModelParserError: Si hay errores de formato o validación
+        """
+        section = 'VARIABLES'
+        variables = []
+
+        # Leer archivo línea por línea para la sección VARIABLES
+        in_variables_section = False
+        with open(self.filepath, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+
+                # Detectar inicio de sección VARIABLES
+                if line == '[VARIABLES]':
+                    in_variables_section = True
+                    continue
+
+                # Detectar fin de sección (nueva sección o EOF)
+                if in_variables_section and line.startswith('['):
+                    break
+
+                # Procesar líneas de variables
+                if in_variables_section and line and not line.startswith('#'):
+                    try:
+                        variable = self._parse_variable_raw_line(line)
+                        variables.append(variable)
+                    except Exception as e:
+                        raise ModelParserError(
+                            f"Error en línea {line_num} parseando variable: {e}"
+                        )
+
+        if not variables:
+            raise ModelParserError("No se encontraron variables en [VARIABLES]")
+
+        return variables
+
+    def _parse_variable_raw_line(self, line: str) -> Variable:
+        """
+        Parsea una línea raw de especificación de variable.
+
+        Args:
+            line: Línea completa "nombre, tipo, distribucion, param1=val1, ..."
+
+        Returns:
+            Objeto Variable
+
+        Examples:
+            _parse_variable_raw_line('x, float, normal, media=0, std=1')
+            -> Variable(nombre='x', tipo='float', distribucion='normal',
+                       parametros={'media': 0.0, 'std': 1.0})
+        """
+        # Dividir por comas
+        parts = [p.strip() for p in line.split(',')]
+
+        if len(parts) < 3:
+            raise ValueError(
+                f"Formato inválido. Esperado: nombre, tipo, distribucion, parametros..."
+            )
+
+        nombre = parts[0]
+        tipo = parts[1].lower()
+        distribucion = parts[2].lower()
+        param_parts = parts[3:]
+
+        return self._parse_variable_line(nombre, f"{tipo}, {distribucion}, {', '.join(param_parts)}")
+
+    def _parse_variable_line(self, nombre: str, spec: str) -> Variable:
+        """
+        Parsea una línea de especificación de variable.
+
+        Args:
+            nombre: Nombre de la variable
+            spec: Especificación "tipo, distribucion, param1=val1, ..."
+
+        Returns:
+            Objeto Variable
+
+        Examples:
+            _parse_variable_line('x', 'float, normal, media=0, std=1')
+            -> Variable(nombre='x', tipo='float', distribucion='normal',
+                       parametros={'media': 0.0, 'std': 1.0})
+        """
+        # Dividir por comas
+        parts = [p.strip() for p in spec.split(',')]
+
+        if len(parts) < 2:
+            raise ValueError(
+                f"Formato inválido. Esperado: tipo, distribucion, parametros..."
+            )
+
+        tipo = parts[0].lower()
+        distribucion = parts[1].lower()
+        param_parts = parts[2:]
+
+        # Validar tipo
+        if tipo not in self.VALID_TIPOS:
+            raise ValueError(
+                f"Tipo '{tipo}' inválido. Válidos: {self.VALID_TIPOS}"
+            )
+
+        # Validar distribución (solo Fase 1 por ahora)
+        if distribucion not in self.VALID_DISTRIBUCIONES_FASE1:
+            raise ValueError(
+                f"Distribución '{distribucion}' no soportada en Fase 1. "
+                f"Válidas: {self.VALID_DISTRIBUCIONES_FASE1}"
+            )
+
+        # Parsear parámetros: "media=0", "std=1"
+        parametros = {}
+        for param_str in param_parts:
+            if '=' not in param_str:
+                raise ValueError(
+                    f"Parámetro inválido: '{param_str}'. "
+                    f"Esperado formato: param=valor"
+                )
+
+            param_name, param_value = param_str.split('=', 1)
+            param_name = param_name.strip()
+            param_value = param_value.strip()
+
+            # Convertir valor a float
+            try:
+                parametros[param_name] = float(param_value)
+            except ValueError:
+                raise ValueError(
+                    f"Valor del parámetro '{param_name}' no es numérico: '{param_value}'"
+                )
+
+        return Variable(
+            nombre=nombre,
+            tipo=tipo,
+            distribucion=distribucion,
+            parametros=parametros
+        )
+
+    def _parse_funcion(self) -> Dict[str, Any]:
+        """
+        Parsea la sección [FUNCION].
+
+        Returns:
+            Diccionario con tipo y contenido de la función
+
+        Raises:
+            ModelParserError: Si hay errores de formato
+        """
+        section = 'FUNCION'
+        funcion = {}
+
+        # Tipo de función
+        try:
+            tipo = self.config.get(section, 'tipo').strip().lower()
+        except configparser.NoOptionError:
+            raise ModelParserError(
+                "Campo 'tipo' requerido en [FUNCION]"
+            )
+
+        if tipo not in ['expresion', 'codigo']:
+            raise ModelParserError(
+                f"Tipo de función inválido: '{tipo}'. "
+                f"Válidos: 'expresion', 'codigo'"
+            )
+
+        funcion['tipo'] = tipo
+
+        # Contenido según tipo
+        if tipo == 'expresion':
+            try:
+                expresion = self.config.get(section, 'expresion').strip()
+            except configparser.NoOptionError:
+                raise ModelParserError(
+                    "Campo 'expresion' requerido cuando tipo='expresion'"
+                )
+
+            if not expresion:
+                raise ModelParserError("Expresión no puede estar vacía")
+
+            funcion['expresion'] = expresion
+
+        elif tipo == 'codigo':
+            # Fase 3 - Por ahora lanzar error
+            raise ModelParserError(
+                "Tipo 'codigo' no soportado en Fase 1. Use tipo='expresion'"
+            )
+
+        return funcion
+
+    def _parse_simulacion(self) -> Dict[str, Any]:
+        """
+        Parsea la sección [SIMULACION].
+
+        Returns:
+            Diccionario con parámetros de simulación
+
+        Raises:
+            ModelParserError: Si hay errores de formato
+        """
+        section = 'SIMULACION'
+        simulacion = {}
+
+        # Número de escenarios (requerido)
+        try:
+            num_escenarios = self.config.getint(section, 'numero_escenarios')
+        except configparser.NoOptionError:
+            raise ModelParserError(
+                "Campo 'numero_escenarios' requerido en [SIMULACION]"
+            )
+        except ValueError as e:
+            raise ModelParserError(
+                f"'numero_escenarios' debe ser un entero: {e}"
+            )
+
+        if num_escenarios <= 0:
+            raise ModelParserError(
+                f"'numero_escenarios' debe ser > 0, obtenido: {num_escenarios}"
+            )
+
+        simulacion['numero_escenarios'] = num_escenarios
+
+        # Semilla aleatoria (opcional)
+        try:
+            semilla = self.config.getint(section, 'semilla_aleatoria')
+            simulacion['semilla_aleatoria'] = semilla
+        except configparser.NoOptionError:
+            simulacion['semilla_aleatoria'] = None
+        except ValueError as e:
+            raise ModelParserError(
+                f"'semilla_aleatoria' debe ser un entero: {e}"
+            )
+
+        return simulacion
+
+
+def parse_model_file(filepath: str) -> Modelo:
+    """
+    Función de conveniencia para parsear un archivo de modelo.
+
+    Args:
+        filepath: Ruta al archivo .ini
+
+    Returns:
+        Modelo parseado
+
+    Raises:
+        ModelParserError: Si hay errores de parsing
+
+    Examples:
+        >>> modelo = parse_model_file('modelos/ejemplo_simple.ini')
+        >>> print(modelo.nombre)
+        suma_normal
+    """
+    parser = ModelParser(filepath)
+    return parser.parse()
+
+
+__all__ = [
+    'ModelParser',
+    'ModelParserError',
+    'Modelo',
+    'Variable',
+    'parse_model_file'
+]

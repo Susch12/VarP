@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # RabbitMQ Message Broker
+  # ============================================
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: varp-rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"    # AMQP protocol
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-password}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - varp-network
+    restart: unless-stopped
+
+  # ============================================
+  # Producer (Fase 1 - Se agregará después)
+  # ============================================
+  # producer:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.producer
+  #   container_name: varp-producer
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     RABBITMQ_HOST: rabbitmq
+  #     RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+  #     RABBITMQ_PASS: ${RABBITMQ_PASS:-password}
+  #   volumes:
+  #     - ./modelos:/app/modelos:ro
+  #   networks:
+  #     - varp-network
+
+  # ============================================
+  # Consumer (Fase 1 - Se agregará después)
+  # ============================================
+  # consumer:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.consumer
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   environment:
+  #     RABBITMQ_HOST: rabbitmq
+  #     RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+  #     RABBITMQ_PASS: ${RABBITMQ_PASS:-password}
+  #   networks:
+  #     - varp-network
+  #   deploy:
+  #     replicas: 2  # Número de consumidores
+
+  # ============================================
+  # Dashboard (Fase 2 - Se agregará después)
+  # ============================================
+  # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.dashboard
+  #   container_name: varp-dashboard
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8050:8050"
+  #   environment:
+  #     RABBITMQ_HOST: rabbitmq
+  #     RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+  #     RABBITMQ_PASS: ${RABBITMQ_PASS:-password}
+  #   networks:
+  #     - varp-network
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  rabbitmq_data:
+    driver: local
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  varp-network:
+    driver: bridge
