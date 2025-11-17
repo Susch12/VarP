@@ -73,7 +73,10 @@ class ModelParser:
 
     REQUIRED_SECTIONS = ['METADATA', 'VARIABLES', 'FUNCION', 'SIMULACION']
     VALID_TIPOS = {'float', 'int'}
-    VALID_DISTRIBUCIONES_FASE1 = {'normal', 'uniform', 'exponential'}
+    VALID_DISTRIBUCIONES = {
+        'normal', 'uniform', 'exponential',  # Fase 1
+        'lognormal', 'triangular', 'binomial'  # Fase 3.2
+    }
 
     def __init__(self, filepath: str):
         """
@@ -301,11 +304,11 @@ class ModelParser:
                 f"Tipo '{tipo}' inválido. Válidos: {self.VALID_TIPOS}"
             )
 
-        # Validar distribución (solo Fase 1 por ahora)
-        if distribucion not in self.VALID_DISTRIBUCIONES_FASE1:
+        # Validar distribución
+        if distribucion not in self.VALID_DISTRIBUCIONES:
             raise ValueError(
-                f"Distribución '{distribucion}' no soportada en Fase 1. "
-                f"Válidas: {self.VALID_DISTRIBUCIONES_FASE1}"
+                f"Distribución '{distribucion}' no soportada. "
+                f"Válidas: {self.VALID_DISTRIBUCIONES}"
             )
 
         # Parsear parámetros: "media=0", "std=1"
@@ -380,12 +383,134 @@ class ModelParser:
             funcion['expresion'] = expresion
 
         elif tipo == 'codigo':
-            # Fase 3 - Por ahora lanzar error
-            raise ModelParserError(
-                "Tipo 'codigo' no soportado en Fase 1. Use tipo='expresion'"
-            )
+            # Fase 3 - Soporte para código Python
+            codigo = self._parse_codigo_multilinea()
+
+            if not codigo:
+                raise ModelParserError("Código no puede estar vacío")
+
+            funcion['codigo'] = codigo
 
         return funcion
+
+    def _parse_codigo_multilinea(self) -> str:
+        """
+        Parsea código Python multilínea de la sección [FUNCION].
+
+        El código debe estar después de una línea 'codigo =' o similar.
+        Todas las líneas siguientes hasta el final de la sección son parte del código.
+
+        Returns:
+            String con el código completo (preservando indentación)
+
+        Raises:
+            ModelParserError: Si no se encuentra código
+
+        Example formato en .ini:
+            [FUNCION]
+            tipo = codigo
+            codigo =
+                # Calcular resultado
+                suma = x + y
+                producto = x * y
+                resultado = suma * producto
+        """
+        codigo_lines = []
+        in_funcion_section = False
+        found_codigo_marker = False
+
+        with open(self.filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped = line.strip()
+
+                # Detectar inicio de sección FUNCION
+                if stripped == '[FUNCION]':
+                    in_funcion_section = True
+                    continue
+
+                # Detectar fin de sección
+                if in_funcion_section and stripped.startswith('['):
+                    break
+
+                # Buscar marcador 'codigo ='
+                if in_funcion_section and not found_codigo_marker:
+                    if stripped.startswith('codigo'):
+                        # Verificar si hay contenido en la misma línea
+                        if '=' in stripped:
+                            parts = stripped.split('=', 1)
+                            if len(parts) == 2 and parts[1].strip():
+                                # Código en la misma línea
+                                codigo_lines.append(parts[1].strip())
+                        found_codigo_marker = True
+                        continue
+
+                # Recolectar líneas de código (después del marcador)
+                if in_funcion_section and found_codigo_marker:
+                    # Ignorar líneas que son otros parámetros
+                    if '=' in stripped and not line.startswith((' ', '\t')):
+                        # Es otro parámetro, no parte del código
+                        continue
+
+                    # Ignorar comentarios INI completos
+                    if stripped.startswith('#') or stripped.startswith(';'):
+                        continue
+
+                    # Agregar línea de código (preservar indentación relativa)
+                    # Remover indentación común pero preservar indentación relativa
+                    codigo_lines.append(line.rstrip())
+
+        if not found_codigo_marker:
+            raise ModelParserError(
+                "No se encontró 'codigo =' en sección [FUNCION]"
+            )
+
+        # Unir líneas y limpiar indentación común
+        codigo = '\n'.join(codigo_lines)
+
+        # Remover indentación común (preservando indentación relativa)
+        codigo = self._dedent_code(codigo)
+
+        return codigo.strip()
+
+    def _dedent_code(self, code: str) -> str:
+        """
+        Remueve indentación común del código, preservando indentación relativa.
+
+        Args:
+            code: Código con posible indentación común
+
+        Returns:
+            Código con indentación común removida
+
+        Example:
+            Input:  "    x = 1\n    y = 2\n        z = x + y"
+            Output: "x = 1\ny = 2\n    z = x + y"
+        """
+        if not code:
+            return code
+
+        lines = code.split('\n')
+
+        # Encontrar indentación mínima (excluyendo líneas vacías)
+        min_indent = float('inf')
+        for line in lines:
+            if line.strip():  # Ignorar líneas vacías
+                # Contar espacios/tabs al inicio
+                indent = len(line) - len(line.lstrip())
+                min_indent = min(min_indent, indent)
+
+        if min_indent == float('inf'):
+            return code
+
+        # Remover indentación común
+        dedented_lines = []
+        for line in lines:
+            if line.strip():
+                dedented_lines.append(line[min_indent:])
+            else:
+                dedented_lines.append('')
+
+        return '\n'.join(dedented_lines)
 
     def _parse_simulacion(self) -> Dict[str, Any]:
         """
