@@ -9,11 +9,14 @@ import threading
 import time
 import logging
 import json
+import csv
+import io
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from collections import deque
 
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 from src.common.rabbitmq_client import RabbitMQClient
@@ -554,6 +557,168 @@ class DataManager:
             'num_resultados': len(self.resultados),
             'last_update': self.last_update
         }
+
+    # FASE 4.3: Métodos de exportación
+
+    def export_resultados_json(self) -> str:
+        """
+        Exporta los resultados y estadísticas a formato JSON.
+
+        Returns:
+            String JSON con resultados completos y estadísticas
+
+        Example:
+            >>> json_data = data_manager.export_resultados_json()
+            >>> with open('resultados.json', 'w') as f:
+            ...     f.write(json_data)
+        """
+        with self._lock:
+            # Construir objeto de exportación
+            export_data = {
+                'metadata': {
+                    'fecha_exportacion': datetime.now().isoformat(),
+                    'num_resultados': len(self.resultados),
+                    'modelo': self.modelo_info.copy(),
+                },
+                'estadisticas': self.estadisticas.copy(),
+                'tests_normalidad': self.tests_normalidad.copy() if self.tests_normalidad else {},
+                'resultados': self.resultados.copy(),
+                'resultados_detallados': self.resultados_raw.copy(),
+                'convergencia': self.historico_convergencia.copy(),
+            }
+
+        # Convertir a JSON con formato legible
+        json_str = json.dumps(export_data, indent=2, ensure_ascii=False, default=str)
+
+        logger.info(f"Resultados exportados a JSON: {len(self.resultados)} resultados")
+        return json_str
+
+    def export_resultados_csv(self, include_metadata: bool = True) -> str:
+        """
+        Exporta los resultados a formato CSV usando pandas.
+
+        Args:
+            include_metadata: Si incluir columnas de metadata (consumer_id, timestamp, etc.)
+
+        Returns:
+            String CSV con resultados
+
+        Example:
+            >>> csv_data = data_manager.export_resultados_csv()
+            >>> with open('resultados.csv', 'w') as f:
+            ...     f.write(csv_data)
+        """
+        with self._lock:
+            resultados_raw = self.resultados_raw.copy()
+            estadisticas = self.estadisticas.copy()
+
+        if not resultados_raw:
+            # Si no hay resultados detallados, usar solo valores
+            with self._lock:
+                resultados = self.resultados.copy()
+
+            df = pd.DataFrame({
+                'resultado': resultados,
+                'escenario_id': range(len(resultados))
+            })
+        else:
+            # Crear DataFrame desde resultados detallados
+            df = pd.DataFrame(resultados_raw)
+
+            # Reordenar columnas
+            base_cols = ['escenario_id', 'resultado']
+            other_cols = [c for c in df.columns if c not in base_cols]
+
+            if include_metadata:
+                df = df[base_cols + other_cols]
+            else:
+                df = df[base_cols]
+
+        # Añadir fila de estadísticas al final (como comentario en el CSV)
+        csv_buffer = io.StringIO()
+
+        # Escribir estadísticas como comentarios
+        if estadisticas:
+            csv_buffer.write(f"# Estadísticas Descriptivas\n")
+            csv_buffer.write(f"# Número de resultados: {estadisticas.get('n', 0)}\n")
+            csv_buffer.write(f"# Media: {estadisticas.get('media', 0):.6f}\n")
+            csv_buffer.write(f"# Mediana: {estadisticas.get('mediana', 0):.6f}\n")
+            csv_buffer.write(f"# Desviación Estándar: {estadisticas.get('desviacion_estandar', 0):.6f}\n")
+            csv_buffer.write(f"# Mínimo: {estadisticas.get('minimo', 0):.6f}\n")
+            csv_buffer.write(f"# Máximo: {estadisticas.get('maximo', 0):.6f}\n")
+            csv_buffer.write(f"#\n")
+
+        # Escribir datos
+        df.to_csv(csv_buffer, index=False, float_format='%.6f')
+
+        csv_str = csv_buffer.getvalue()
+
+        logger.info(f"Resultados exportados a CSV: {len(df)} filas")
+        return csv_str
+
+    def export_estadisticas_csv(self) -> str:
+        """
+        Exporta solo las estadísticas descriptivas a CSV.
+
+        Returns:
+            String CSV con estadísticas en formato tabla
+
+        Example:
+            >>> csv_data = data_manager.export_estadisticas_csv()
+            >>> with open('estadisticas.csv', 'w') as f:
+            ...     f.write(csv_data)
+        """
+        with self._lock:
+            estadisticas = self.estadisticas.copy()
+
+        if not estadisticas:
+            return "Estadistica,Valor\n# Sin datos disponibles\n"
+
+        # Crear DataFrame con estadísticas
+        rows = []
+        for key, value in estadisticas.items():
+            if key == 'intervalo_confianza_95':
+                rows.append(['IC 95% Inferior', value['inferior']])
+                rows.append(['IC 95% Superior', value['superior']])
+            elif isinstance(value, (int, float)):
+                rows.append([key.replace('_', ' ').title(), value])
+
+        df = pd.DataFrame(rows, columns=['Estadistica', 'Valor'])
+
+        csv_str = df.to_csv(index=False, float_format='%.6f')
+
+        logger.info("Estadísticas exportadas a CSV")
+        return csv_str
+
+    def export_convergencia_csv(self) -> str:
+        """
+        Exporta datos de convergencia a CSV.
+
+        Returns:
+            String CSV con histórico de convergencia
+
+        Example:
+            >>> csv_data = data_manager.export_convergencia_csv()
+            >>> with open('convergencia.csv', 'w') as f:
+            ...     f.write(csv_data)
+        """
+        with self._lock:
+            convergencia = self.historico_convergencia.copy()
+
+        if not convergencia:
+            return "n,media,varianza,timestamp\n# Sin datos de convergencia disponibles\n"
+
+        # Crear DataFrame
+        df = pd.DataFrame(convergencia)
+
+        # Convertir timestamp a formato legible
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+
+        csv_str = df.to_csv(index=False, float_format='%.6f')
+
+        logger.info(f"Convergencia exportada a CSV: {len(df)} puntos")
+        return csv_str
 
 
 __all__ = ['DataManager']

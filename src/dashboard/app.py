@@ -13,6 +13,8 @@ import base64
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
+import numpy as np
+from scipy import stats
 import dash
 from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
@@ -402,42 +404,17 @@ class MonteCarloDashboard:
             prevent_initial_call=True
         )
         def export_csv(n_clicks):
-            """Exporta resultados a CSV."""
+            """Exporta resultados a CSV usando pandas (FASE 4.3)."""
             try:
-                resultados_raw = self.data_manager.get_resultados_raw()
-                estadisticas = self.data_manager.get_estadisticas()
+                # Usar nuevo método de exportación de data_manager
+                csv_str = self.data_manager.export_resultados_csv(include_metadata=True)
 
-                if not resultados_raw:
+                if not csv_str:
                     return None
-
-                # Crear CSV en memoria
-                output = io.StringIO()
-                writer = csv.writer(output)
-
-                # Header
-                writer.writerow(['escenario_id', 'consumer_id', 'resultado', 'tiempo_ejecucion'])
-
-                # Datos
-                for res in resultados_raw:
-                    writer.writerow([
-                        res.get('escenario_id'),
-                        res.get('consumer_id'),
-                        res.get('resultado'),
-                        res.get('tiempo_ejecucion')
-                    ])
-
-                # Agregar estadísticas al final
-                writer.writerow([])
-                writer.writerow(['ESTADISTICAS'])
-                for key, value in estadisticas.items():
-                    if isinstance(value, dict):
-                        writer.writerow([key, json.dumps(value)])
-                    else:
-                        writer.writerow([key, value])
 
                 # Retornar para descarga
                 return dict(
-                    content=output.getvalue(),
+                    content=csv_str,
                     filename=f"resultados_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 )
 
@@ -452,30 +429,17 @@ class MonteCarloDashboard:
             prevent_initial_call=True
         )
         def export_json(n_clicks):
-            """Exporta resultados y estadísticas a JSON."""
+            """Exporta resultados y estadísticas a JSON (FASE 4.3)."""
             try:
-                resultados_raw = self.data_manager.get_resultados_raw()
-                estadisticas = self.data_manager.get_estadisticas()
-                modelo_info = self.data_manager.get_modelo_info()
-                stats_prod = self.data_manager.get_stats_productor()
-                stats_cons = self.data_manager.get_stats_consumidores()
+                # Usar nuevo método de exportación de data_manager
+                json_str = self.data_manager.export_resultados_json()
 
-                # Crear estructura JSON
-                data = {
-                    'metadata': {
-                        'fecha_exportacion': datetime.now().isoformat(),
-                        'num_resultados': len(resultados_raw)
-                    },
-                    'modelo': modelo_info,
-                    'productor': stats_prod,
-                    'consumidores': stats_cons,
-                    'estadisticas': estadisticas,
-                    'resultados': resultados_raw
-                }
+                if not json_str:
+                    return None
 
                 # Retornar para descarga
                 return dict(
-                    content=json.dumps(data, indent=2),
+                    content=json_str,
                     filename=f"simulacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
                 )
 

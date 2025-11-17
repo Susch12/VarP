@@ -48,6 +48,12 @@ class RabbitMQClient:
         """
         Establece conexión con RabbitMQ.
 
+        FASE 4.2: Configuración óptima con:
+        - Heartbeat configurable para detección de conexiones muertas
+        - Connection timeout para evitar cuelgues
+        - Blocked connection timeout para flow control
+        - Socket timeout para operaciones de red
+
         Raises:
             RabbitMQConnectionError: Si falla la conexión
         """
@@ -57,14 +63,22 @@ class RabbitMQClient:
                 host=self.host,
                 port=self.port,
                 credentials=credentials,
-                heartbeat=600,
-                blocked_connection_timeout=300
+                # FASE 4.2: Configuración óptima de timeouts
+                heartbeat=RabbitMQConfig.HEARTBEAT,
+                connection_attempts=3,
+                retry_delay=2,
+                socket_timeout=RabbitMQConfig.SOCKET_TIMEOUT,
+                stack_timeout=RabbitMQConfig.STACK_TIMEOUT,
+                blocked_connection_timeout=RabbitMQConfig.BLOCKED_CONNECTION_TIMEOUT,
             )
 
             self.connection = pika.BlockingConnection(parameters)
             self.channel = self.connection.channel()
 
-            logger.info(f"Conectado a RabbitMQ en {self.host}:{self.port}")
+            logger.info(
+                f"Conectado a RabbitMQ en {self.host}:{self.port} "
+                f"(heartbeat={RabbitMQConfig.HEARTBEAT}s)"
+            )
 
         except pika.exceptions.AMQPConnectionError as e:
             raise RabbitMQConnectionError(
