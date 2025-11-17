@@ -1,0 +1,87 @@
+"""
+Configuración centralizada del sistema de simulación Monte Carlo.
+Lee variables de entorno desde .env y proporciona valores por defecto.
+"""
+
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde .env
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+load_dotenv(BASE_DIR / '.env')
+
+
+class RabbitMQConfig:
+    """Configuración de RabbitMQ."""
+
+    HOST = os.getenv('RABBITMQ_HOST', 'localhost')
+    PORT = int(os.getenv('RABBITMQ_PORT', '5672'))
+    USER = os.getenv('RABBITMQ_USER', 'admin')
+    PASS = os.getenv('RABBITMQ_PASS', 'password')
+    VHOST = os.getenv('RABBITMQ_VHOST', '/')
+    MGMT_PORT = int(os.getenv('RABBITMQ_MGMT_PORT', '15672'))
+
+    @classmethod
+    def get_connection_url(cls) -> str:
+        """Retorna URL de conexión para pika."""
+        return f'amqp://{cls.USER}:{cls.PASS}@{cls.HOST}:{cls.PORT}{cls.VHOST}'
+
+
+class QueueConfig:
+    """Nombres de las colas."""
+
+    MODELO = os.getenv('QUEUE_MODELO', 'cola_modelo')
+    ESCENARIOS = os.getenv('QUEUE_ESCENARIOS', 'cola_escenarios')
+    RESULTADOS = os.getenv('QUEUE_RESULTADOS', 'cola_resultados')
+    STATS_PRODUCTOR = os.getenv('QUEUE_STATS_PRODUCTOR', 'cola_stats_productor')
+    STATS_CONSUMIDORES = os.getenv('QUEUE_STATS_CONSUMIDORES', 'cola_stats_consumidores')
+
+
+class ProducerConfig:
+    """Configuración del productor."""
+
+    STATS_INTERVAL = int(os.getenv('PRODUCER_STATS_INTERVAL', '1'))
+
+
+class ConsumerConfig:
+    """Configuración del consumidor."""
+
+    STATS_INTERVAL = int(os.getenv('CONSUMER_STATS_INTERVAL', '2'))
+    PREFETCH_COUNT = int(os.getenv('CONSUMER_PREFETCH_COUNT', '1'))
+    TIMEOUT = int(os.getenv('CONSUMER_TIMEOUT', '30'))
+
+
+class DashboardConfig:
+    """Configuración del dashboard."""
+
+    HOST = os.getenv('DASHBOARD_HOST', '0.0.0.0')
+    PORT = int(os.getenv('DASHBOARD_PORT', '8050'))
+    REFRESH_INTERVAL = int(os.getenv('DASHBOARD_REFRESH_INTERVAL', '2000'))
+
+
+class SimulationConfig:
+    """Configuración de simulación."""
+
+    DEFAULT_NUM_ESCENARIOS = int(os.getenv('DEFAULT_NUM_ESCENARIOS', '1000'))
+    DEFAULT_RANDOM_SEED = int(os.getenv('DEFAULT_RANDOM_SEED', '42'))
+
+
+class LogConfig:
+    """Configuración de logging."""
+
+    LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    FORMAT = os.getenv('LOG_FORMAT', 'colored')
+
+
+# Exportar configuraciones
+__all__ = [
+    'RabbitMQConfig',
+    'QueueConfig',
+    'ProducerConfig',
+    'ConsumerConfig',
+    'DashboardConfig',
+    'SimulationConfig',
+    'LogConfig',
+    'BASE_DIR'
+]
