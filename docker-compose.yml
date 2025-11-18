@@ -1,97 +1,237 @@
+# Docker Compose para Sistema VarP Monte Carlo
+# Fase 5.1: Dockerización completa
+#
+# Servicios:
+# - rabbitmq: Message broker (RabbitMQ con management UI)
+# - producer: Genera escenarios de simulación
+# - consumer: Procesa escenarios (escalable)
+# - dashboard: Dashboard web de monitoreo
+#
+# Uso:
+#   docker-compose up -d                    # Iniciar todos los servicios
+#   docker-compose up -d --scale consumer=5 # Iniciar con 5 consumidores
+#   docker-compose logs -f dashboard        # Ver logs del dashboard
+#   docker-compose down                     # Detener y remover contenedores
+
 version: '3.8'
 
 services:
   # ============================================
-  # RabbitMQ Message Broker
+  # RabbitMQ - Message Broker
   # ============================================
   rabbitmq:
-    image: rabbitmq:3.12-management
+    image: rabbitmq:3.12-management-alpine
     container_name: varp-rabbitmq
     hostname: rabbitmq
     ports:
-      - "5672:5672"    # AMQP protocol
-      - "15672:15672"  # Management UI
+      - "${RABBITMQ_PORT:-5672}:5672"       # AMQP protocol
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672" # Management UI
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-password}
-      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS:-password}
+      - RABBITMQ_DEFAULT_VHOST=${RABBITMQ_VHOST:-/}
+      # Optimizaciones de Fase 4.2
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit heartbeat 60
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      - rabbitmq_logs:/var/log/rabbitmq
     networks:
       - varp-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     restart: unless-stopped
+    labels:
+      - "com.varp.service=rabbitmq"
+      - "com.varp.description=Message broker para sistema distribuido"
 
   # ============================================
-  # Producer (Fase 1 - Se agregará después)
+  # Producer - Generador de Escenarios
   # ============================================
-  # producer:
-  #   build:
-  #     context: .
-  #     dockerfile: docker/Dockerfile.producer
-  #   container_name: varp-producer
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     RABBITMQ_HOST: rabbitmq
-  #     RABBITMQ_USER: ${RABBITMQ_USER:-admin}
-  #     RABBITMQ_PASS: ${RABBITMQ_PASS:-password}
-  #   volumes:
-  #     - ./modelos:/app/modelos:ro
-  #   networks:
-  #     - varp-network
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    container_name: varp-producer
+    environment:
+      # RabbitMQ connection
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-password}
+      - RABBITMQ_VHOST=${RABBITMQ_VHOST:-/}
+
+      # Producer config (Fase 4: Optimizaciones)
+      - PRODUCER_STATS_INTERVAL=${PRODUCER_STATS_INTERVAL:-5}
+
+      # Simulation config
+      - DEFAULT_NUM_ESCENARIOS=${DEFAULT_NUM_ESCENARIOS:-1000}
+      - DEFAULT_RANDOM_SEED=${DEFAULT_RANDOM_SEED:-42}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-colored}
+    volumes:
+      - ./modelos:/app/modelos:ro  # Modelos de simulación (read-only)
+    networks:
+      - varp-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+    command: >
+      sh -c "
+        echo 'Esperando a RabbitMQ...' &&
+        sleep 5 &&
+        echo 'Iniciando productor...' &&
+        python -c \"
+from src.producer.producer import Producer
+from src.common.rabbitmq_client import RabbitMQClient
+import os
+
+client = RabbitMQClient()
+client.connect()
+producer = Producer(client)
+modelo = os.getenv('MODELO_FILE', 'modelos/ejemplo_simple.ini')
+num_escenarios = int(os.getenv('DEFAULT_NUM_ESCENARIOS', '1000'))
+producer.ejecutar(modelo, num_escenarios)
+client.disconnect()
+        \"
+      "
+    labels:
+      - "com.varp.service=producer"
+      - "com.varp.description=Generador de escenarios Monte Carlo"
 
   # ============================================
-  # Consumer (Fase 1 - Se agregará después)
+  # Consumer - Procesador de Escenarios
   # ============================================
-  # consumer:
-  #   build:
-  #     context: .
-  #     dockerfile: docker/Dockerfile.consumer
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #     RABBITMQ_HOST: rabbitmq
-  #     RABBITMQ_USER: ${RABBITMQ_USER:-admin}
-  #     RABBITMQ_PASS: ${RABBITMQ_PASS:-password}
-  #   networks:
-  #     - varp-network
-  #   deploy:
-  #     replicas: 2  # Número de consumidores
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    # No usar container_name para permitir scaling
+    # container_name: varp-consumer
+    environment:
+      # RabbitMQ connection
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-password}
+      - RABBITMQ_VHOST=${RABBITMQ_VHOST:-/}
+
+      # Consumer config (Fase 4: Optimizaciones)
+      - CONSUMER_STATS_INTERVAL=${CONSUMER_STATS_INTERVAL:-5}
+      - CONSUMER_PREFETCH_COUNT=${CONSUMER_PREFETCH_COUNT:-1}
+      - CONSUMER_TIMEOUT=${CONSUMER_TIMEOUT:-30}
+
+      # Error handling (Fase 4.1)
+      - CONSUMER_MAX_RETRIES=${CONSUMER_MAX_RETRIES:-3}
+      - CONSUMER_RETRY_DELAY=${CONSUMER_RETRY_DELAY:-5}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-colored}
+    networks:
+      - varp-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      producer:
+        condition: service_started
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Esperando a RabbitMQ y modelo...' &&
+        sleep 10 &&
+        echo 'Iniciando consumidor...' &&
+        python -c \"
+from src.consumer.consumer import Consumer
+from src.common.rabbitmq_client import RabbitMQClient
+
+client = RabbitMQClient()
+client.connect()
+consumer = Consumer(client)
+try:
+    consumer.ejecutar()
+except KeyboardInterrupt:
+    print('Consumidor detenido')
+finally:
+    client.disconnect()
+        \"
+      "
+    labels:
+      - "com.varp.service=consumer"
+      - "com.varp.description=Procesador de escenarios Monte Carlo"
+    # Permitir escalar con: docker-compose up -d --scale consumer=5
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
 
   # ============================================
-  # Dashboard (Fase 2 - Se agregará después)
+  # Dashboard - Monitoreo Web
   # ============================================
-  # dashboard:
-  #   build:
-  #     context: .
-  #     dockerfile: docker/Dockerfile.dashboard
-  #   container_name: varp-dashboard
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   ports:
-  #     - "8050:8050"
-  #   environment:
-  #     RABBITMQ_HOST: rabbitmq
-  #     RABBITMQ_USER: ${RABBITMQ_USER:-admin}
-  #     RABBITMQ_PASS: ${RABBITMQ_PASS:-password}
-  #   networks:
-  #     - varp-network
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: varp-dashboard
+    ports:
+      - "${DASHBOARD_PORT:-8050}:8050"
+    environment:
+      # RabbitMQ connection
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-password}
+      - RABBITMQ_VHOST=${RABBITMQ_VHOST:-/}
 
-# ============================================
-# Volumes
-# ============================================
-volumes:
-  rabbitmq_data:
-    driver: local
+      # Dashboard config
+      - DASHBOARD_HOST=0.0.0.0
+      - DASHBOARD_PORT=8050
+      - DASHBOARD_REFRESH_INTERVAL=${DASHBOARD_REFRESH_INTERVAL:-2000}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-colored}
+    networks:
+      - varp-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8050/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    command: >
+      sh -c "
+        echo 'Esperando a RabbitMQ...' &&
+        sleep 5 &&
+        echo 'Iniciando dashboard en http://0.0.0.0:8050' &&
+        python -c \"
+from src.dashboard.app import create_dashboard
+from src.common.rabbitmq_client import RabbitMQClient
+
+client = RabbitMQClient()
+client.connect()
+dashboard = create_dashboard(client)
+dashboard.start(host='0.0.0.0', port=8050, debug=False)
+        \"
+      "
+    labels:
+      - "com.varp.service=dashboard"
+      - "com.varp.description=Dashboard web de monitoreo en tiempo real"
 
 # ============================================
 # Networks
@@ -99,3 +239,18 @@ volumes:
 networks:
   varp-network:
     driver: bridge
+    labels:
+      - "com.varp.network=main"
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  rabbitmq_data:
+    driver: local
+    labels:
+      - "com.varp.volume=rabbitmq-data"
+  rabbitmq_logs:
+    driver: local
+    labels:
+      - "com.varp.volume=rabbitmq-logs"

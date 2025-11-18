@@ -1,0 +1,132 @@
+# .dockerignore para Sistema VarP Monte Carlo
+# Fase 5.1: Dockerización completa
+#
+# Archivos y directorios a excluir de las builds de Docker
+
+# ============================================
+# Git
+# ============================================
+.git
+.gitignore
+.gitattributes
+
+# ============================================
+# Python
+# ============================================
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# ============================================
+# Virtual environments
+# ============================================
+venv/
+ENV/
+env/
+.venv
+
+# ============================================
+# IDE
+# ============================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ============================================
+# Documentation
+# ============================================
+docs/
+*.md
+!requirements.txt
+
+# ============================================
+# Tests
+# ============================================
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.pytest_cache/
+
+# ============================================
+# CI/CD
+# ============================================
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# ============================================
+# Docker
+# ============================================
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+
+# ============================================
+# Environment
+# ============================================
+.env
+.env.local
+.env.*.local
+
+# ============================================
+# Temporary files
+# ============================================
+*.tmp
+*.temp
+.cache/
+
+# ============================================
+# Data (excluir datos grandes)
+# ============================================
+data/
+*.csv
+*.xlsx
+*.json
+# NO excluir modelos/*.ini
+!modelos/*.ini
+
+# ============================================
+# Tools
+# ============================================
+tools/
+
+# ============================================
+# README files
+# ============================================
+README.md
+FASE_*.md
+TEST_*.md
