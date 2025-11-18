@@ -1,0 +1,48 @@
+# Dockerfile para Dashboard de Simulación Monte Carlo
+# Fase 5.1: Dockerización completa
+
+FROM python:3.10-slim
+
+# Metadata
+LABEL maintainer="VarP Monte Carlo"
+LABEL description="Dashboard web para monitoreo en tiempo real de simulación Monte Carlo"
+
+# Establecer directorio de trabajo
+WORKDIR /app
+
+# Variables de entorno para Python
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Instalar dependencias del sistema
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar requirements primero (aprovecha cache de Docker)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar código fuente
+COPY src/ ./src/
+
+# Crear usuario no-root para seguridad
+RUN useradd -m -u 1000 varp && \
+    chown -R varp:varp /app
+
+# Cambiar a usuario no-root
+USER varp
+
+# Exponer puerto del dashboard
+EXPOSE 8050
+
+# Health check (verifica que el servidor web responda)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8050/ || exit 1
+
+# Comando por defecto
+CMD ["python", "-m", "src.dashboard.app"]
